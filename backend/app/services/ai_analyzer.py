@@ -17,6 +17,10 @@ from app.services.ai_prompts import (
     SECTION_PROMPTS,
     SectionPrompt,
 )
+from app.services.evaluation_table_extractor import (
+    extract_evaluation_table_from_pdf,
+    format_weight_map,
+)
 from app.services.section_extractor import SECTION_DEFINITIONS, extract_sections_from_text
 
 
@@ -312,6 +316,7 @@ Reglas adicionales para evaluaciones:
                 "section_found": section.get("section_found", False),
                 "source_strategy": section.get("source_strategy", ""),
                 "source_excerpt": section.get("source_excerpt", ""),
+                "structured_data": section.get("structured_data", {}),
                 "missing_or_ambiguous_elements": section.get("missing_or_ambiguous_elements", []),
             }
         )
@@ -460,6 +465,136 @@ def _is_equivalent_evaluation_weighting_alert(item: dict[str, Any]) -> bool:
     return all(parsed == first for parsed in parsed_sets[1:])
 
 
+def _canonical_rule_text(text: str) -> str:
+    normalized = _normalize_loose_text(text)
+    normalized = re.sub(r"\b(nota|calificacion)\s+(final|de aprobacion)\b", "nota final", normalized)
+    normalized = re.sub(r"\bmayor\s+o\s+igual\s+(?:a\s+)?\b", ">= ", normalized)
+    normalized = re.sub(r"\bigual\s+o\s+mayor\s+(?:a\s+)?\b", ">= ", normalized)
+    normalized = re.sub(r"\bminima?\s+(?:de\s+)?\b", "minima ", normalized)
+    normalized = re.sub(r"\b4 0\b", "4", normalized)
+    normalized = re.sub(r"\b4 00\b", "4", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _is_same_rule_reported_as_difference(item: dict[str, Any]) -> bool:
+    involved_nrcs = [str(nrc) for nrc in item.get("involved_nrcs", [])]
+    if len(involved_nrcs) < 2:
+        return False
+
+    difference = str(item.get("difference") or "")
+    evidence = str(item.get("evidence") or "")
+    values_by_nrc = _split_values_by_nrc(difference, involved_nrcs)
+    if len(values_by_nrc) < 2:
+        values_by_nrc = _split_values_by_nrc(evidence, involved_nrcs)
+    if len(values_by_nrc) < 2:
+        return False
+
+    canonical_values = {
+        _canonical_rule_text(value)
+        for value in values_by_nrc.values()
+        if _canonical_rule_text(value)
+    }
+    return len(canonical_values) == 1
+
+
+def _should_discard_ai_alert(item: dict[str, Any]) -> bool:
+    return (
+        _is_equivalent_evaluation_weighting_alert(item)
+        or _is_same_rule_reported_as_difference(item)
+    )
+
+
+def _evaluation_weight_map(section_result: dict[str, Any]) -> dict[str, Decimal]:
+    raw_weight_map = section_result.get("structured_data", {}).get("weight_map", {})
+    weights: dict[str, Decimal] = {}
+    if not isinstance(raw_weight_map, dict):
+        return weights
+
+    for instrument, raw_percent in raw_weight_map.items():
+        try:
+            weights[str(instrument)] = Decimal(str(raw_percent).replace(",", "."))
+        except InvalidOperation:
+            continue
+    return weights
+
+
+def _build_evaluation_table_comparison(
+    extracted_by_nrc: dict[str, Any],
+    compared_nrcs: list[str],
+) -> dict[str, Any] | None:
+    weights_by_nrc: dict[str, dict[str, Decimal]] = {}
+    for nrc in compared_nrcs:
+        section = extracted_by_nrc.get(nrc, {}).get("sections", {}).get("evaluations", {})
+        weights = _evaluation_weight_map(section)
+        if not weights:
+            return None
+        weights_by_nrc[nrc] = weights
+
+    all_instruments = sorted(
+        {
+            instrument
+            for weights in weights_by_nrc.values()
+            for instrument in weights.keys()
+        }
+    )
+    inconsistencies: list[dict[str, Any]] = []
+    outlier_counts = {nrc: 0 for nrc in compared_nrcs}
+
+    for instrument in all_instruments:
+        values = {nrc: weights.get(instrument) for nrc, weights in weights_by_nrc.items()}
+        present_values = {value for value in values.values() if value is not None}
+        if len(present_values) == 1 and all(value is not None for value in values.values()):
+            continue
+
+        difference_parts = []
+        for nrc in compared_nrcs:
+            value = values[nrc]
+            if value is None:
+                difference_parts.append(f"NRC {nrc}: No informado")
+            else:
+                difference_parts.append(f"NRC {nrc}: {format_weight_map({instrument: value})}")
+                outlier_counts[nrc] += 1
+
+        variable = f"Ponderación de {instrument.title()}"
+        inconsistencies.append(
+            {
+                "section": "Evaluaciones y Ponderaciones",
+                "variable": variable,
+                "difference": " | ".join(difference_parts),
+                "involved_nrcs": compared_nrcs,
+                "severity": "Crítica",
+                "priority_rationale": "La ponderación de una evaluación cambia entre syllabus.",
+                "suggestion": "Confirmar la ponderación oficial y actualizar los syllabus discrepantes.",
+                "evidence": "Comparación determinística de tablas extraídas por coordenadas: "
+                + " | ".join(
+                    f"NRC {nrc}: {format_weight_map(weights)}"
+                    for nrc, weights in weights_by_nrc.items()
+                ),
+                "is_main_alert": True,
+            }
+        )
+
+    outlier_nrc = max(outlier_counts, key=outlier_counts.get) if outlier_counts else ""
+    outlier_alert_count = outlier_counts.get(outlier_nrc, 0)
+    return {
+        "analysis_mode": "pairwise" if len(compared_nrcs) == 2 else "group_pattern",
+        "compared_nrcs": compared_nrcs,
+        "overall_summary": (
+            "Se detectaron diferencias en ponderaciones de evaluaciones extraídas desde tablas."
+            if inconsistencies
+            else "No se detectaron diferencias en las ponderaciones tabulares de evaluaciones."
+        ),
+        "severity_counts": {"critica": len(inconsistencies), "moderada": 0, "menor": 0},
+        "possible_outlier": {
+            "nrc": outlier_nrc if outlier_alert_count else "",
+            "alert_count": outlier_alert_count,
+            "reason": "Presenta más diferencias en ponderaciones tabulares." if outlier_alert_count else "",
+        },
+        "inconsistencies": inconsistencies,
+    }
+
+
 def _variables_to_dict(section_result: dict[str, Any]) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for variable in section_result.get("extracted_variables", []):
@@ -571,6 +706,7 @@ def _build_comparison_payload(course_metadata: dict[str, Any], extracted_by_nrc:
                 "section_name": section_result.get("section_name", section_key),
                 "source_excerpt": section_result.get("source_excerpt", ""),
                 "source_strategy": section_result.get("source_strategy", ""),
+                "structured_data": section_result.get("structured_data", {}),
                 "extracted_variables": section_result.get("extracted_variables", []),
                 "missing_or_ambiguous_elements": section_result.get("missing_or_ambiguous_elements", []),
                 "academic_interpretation": section_result.get("academic_interpretation", ""),
@@ -672,7 +808,7 @@ def _combine_section_comparisons(
     for comparison in comparisons:
         summaries.append(str(comparison.get("overall_summary") or "").strip())
         for item in comparison.get("inconsistencies", []):
-            if _is_equivalent_evaluation_weighting_alert(item):
+            if _should_discard_ai_alert(item):
                 continue
 
             inconsistencies.append(item)
@@ -728,6 +864,11 @@ def analyze_syllabi_with_ai(
 
     for syllabus in syllabi:
         section_results = extract_sections_from_text(syllabus.text_content or "", text_limit)
+        stored_path = str(getattr(syllabus, "stored_path", "") or "")
+        evaluation_table = extract_evaluation_table_from_pdf(stored_path, text_limit)
+        if evaluation_table is not None:
+            section_results["evaluations"] = evaluation_table
+
         extracted_by_nrc[syllabus.nrc] = {
             "metadata": {
                 "academic_period": syllabus.academic_period,
@@ -752,6 +893,12 @@ def analyze_syllabi_with_ai(
     ]
 
     for definition in comparable_sections:
+        if definition.key == "evaluations":
+            table_comparison = _build_evaluation_table_comparison(extracted_by_nrc, compared_nrcs)
+            if table_comparison is not None:
+                section_comparisons.append(table_comparison)
+                continue
+
         has_section_text = any(
             (syllabus_data.get("sections", {}).get(definition.key, {}).get("source_excerpt") or "").strip()
             for syllabus_data in extracted_by_nrc.values()

@@ -69,11 +69,11 @@ Luego:
 4. Selecciona el curso `2207`.
 5. Presiona `Analizar`.
 
-El ejemplo contiene tres NRC de Termodinámica. Dos tienen reglas equivalentes con distinta redacción y un tercero cambia ponderaciones y umbral de eximición. El análisis recorta apartados por subtítulos y luego compara los syllabus con JSON estructurado.
+El ejemplo contiene tres NRC de Termodinámica. Dos tienen reglas equivalentes con distinta redacción y un tercero cambia ponderaciones y umbral de eximición. El análisis extrae texto relevante por sección y luego compara los syllabus con JSON estructurado.
 
 ## Flujo de análisis
 
-El backend guarda el PDF como respaldo, extrae su texto con PyMuPDF y recorta secciones usando subtítulos conocidos como índice de inicio y el siguiente subtítulo como índice de cierre. En concreto, prioriza:
+El backend guarda el PDF como respaldo, extrae su texto y recorta solo las secciones relevantes antes de llamar a la IA. En concreto, prioriza:
 
 - Información general de la asignatura.
 - Evaluaciones y ponderaciones.
@@ -81,7 +81,7 @@ El backend guarda el PDF como respaldo, extrae su texto con PyMuPDF y recorta se
 - Nota final de la asignatura.
 - Criterios de eximición y reglas especiales detectadas dentro de esas secciones.
 
-La IA ya no extrae variables sección por sección desde cada PDF. Recibe el texto ya recortado de un mismo apartado para todos los NRC y solo compara diferencias académicas. Esto reduce la cantidad de llamadas desde `syllabus * 5 + 1` a, como máximo, una comparación por apartado relevante.
+Cada sección se envía como texto plano y el resultado se conserva con evidencia textual para trazabilidad.
 
 ## Formato esperado de archivos
 

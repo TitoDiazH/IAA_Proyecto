@@ -202,6 +202,38 @@ def test_equivalent_evaluation_weight_order_is_not_reported_as_alert():
     assert "No se detectaron diferencias relevantes" in result["overall_summary"]
 
 
+def test_same_approval_rule_is_not_reported_as_alert():
+    comparison = {
+        "analysis_mode": "pairwise",
+        "compared_nrcs": ["7587", "7588"],
+        "overall_summary": "Se detectó una diferencia en requisitos de aprobación.",
+        "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
+        "possible_outlier": {"nrc": "", "alert_count": 0, "reason": ""},
+        "inconsistencies": [
+            {
+                "section": "Requisitos de Aprobación",
+                "variable": "Nota mínima de aprobación",
+                "difference": (
+                    "NRC 7588: nota final mayor o igual a 4 "
+                    "NRC 7587: nota final mayor o igual a 4"
+                ),
+                "involved_nrcs": ["7587", "7588"],
+                "severity": "Crítica",
+                "priority_rationale": "Afecta aprobación.",
+                "suggestion": "Revisar requisitos de aprobación.",
+                "evidence": "Ambos textos indican la misma regla.",
+                "is_main_alert": True,
+            }
+        ],
+    }
+
+    result = _combine_section_comparisons([comparison], ["7587", "7588"])
+
+    assert result["inconsistencies"] == []
+    assert result["severity_counts"] == {"critica": 0, "moderada": 0, "menor": 0}
+    assert result["possible_outlier"]["nrc"] == ""
+
+
 def test_extract_sections_from_text_uses_heading_boundaries():
     text = """
 --- Página 1 ---
