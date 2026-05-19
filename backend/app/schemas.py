@@ -64,7 +64,7 @@ class InconsistencyRead(BaseModel):
     involved_nrcs: list[str]
     severity: str
     suggestion: str
-    evidence: dict[str, Any]
+    evidence: Any
     created_at: datetime
 
 

@@ -221,16 +221,9 @@ function ReportView({ report }) {
     <section className="report">
       <div className="report-header">
         <div>
-          <p className="eyebrow">Reporte comparativo</p>
-          <h3>{course.course_name || "Curso analizado"}</h3>
+          <h3>Reporte comparativo</h3>
         </div>
         <span className="time">{report.processing_time_seconds}s</span>
-      </div>
-
-      <div className="report-meta">
-        <span>{course.academic_period}</span>
-        <span>{course.course_code}</span>
-        <span>NRC: {report.compared_nrcs.join(", ")}</span>
       </div>
 
       <div className="severity-summary">
@@ -349,7 +342,6 @@ export default function App() {
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">MVP académico</p>
           <h1>Revisión comparativa de syllabus</h1>
         </div>
         <button className="ghost-button" onClick={() => refreshCourses()} disabled={loading}>

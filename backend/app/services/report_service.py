@@ -55,7 +55,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
     comparison = analyze_syllabi_with_ai(syllabi, course_metadata)
     elapsed = round(time.perf_counter() - started_at, 3)
     summary = comparison["summary"]
-    summary["course"] = course_metadata
+    summary["course"] = comparison.get("course", course_metadata)
 
     report = AnalysisReport(
         course_group_id=course.id,
@@ -68,16 +68,19 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
     db.flush()
 
     for item in comparison["inconsistencies"]:
+        difference = item.get("difference") or item.get("description") or ""
+        suggestion = item.get("suggestion") or item.get("suggested_action") or ""
+        evidence = item.get("evidence") or {}
         db.add(
             Inconsistency(
                 report_id=report.id,
                 section=item["section"],
                 variable=item["variable"],
-                difference=item["difference"],
-                involved_nrcs=item["involved_nrcs"],
+                difference=difference,
+                involved_nrcs=item.get("involved_nrcs") or item.get("outlier_nrcs") or list(item.get("values_by_nrc", {}).keys()),
                 severity=item["severity"],
-                suggestion=item["suggestion"],
-                evidence=item["evidence"],
+                suggestion=suggestion,
+                evidence=evidence,
             )
         )
 

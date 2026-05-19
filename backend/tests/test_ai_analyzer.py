@@ -1,9 +1,5 @@
-from app.services.ai_analyzer import (
-    analyze_syllabi_with_ai,
-    _combine_section_comparisons,
-    _comparison_user_prompt_for_section,
-)
-from app.services.section_extractor import extract_sections_from_text
+from app.services.ai_analyzer import analyze_syllabi_with_ai
+from app.services.syllabus_comparator import compare_normalized_syllabi
 
 
 class FakeSyllabus:
@@ -33,48 +29,106 @@ class FakeAIClient:
                 "schema": schema,
             }
         )
-        if schema_name.endswith("_comparison_report"):
+
+        if schema_name == "syllabus_extraction":
             return {
-                "analysis_mode": "pairwise",
-                "compared_nrcs": ["7542", "7543"],
-                "overall_summary": "Se detectó una diferencia en el umbral de eximición.",
-                "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
-                "possible_outlier": {"nrc": "", "alert_count": 0, "reason": ""},
-                "inconsistencies": [
-                    {
-                        "section": "Criterios de Eximición",
-                        "variable": "Umbral de eximición",
-                        "difference": "NRC 7542 exige 5,5 y NRC 7543 exige 5,8.",
-                        "involved_nrcs": ["7542", "7543"],
-                        "severity": "Crítica",
-                        "priority_rationale": "Afecta directamente la eximición del examen.",
-                        "suggestion": "Confirmar el umbral oficial y unificar los syllabus.",
-                        "evidence": "Extracción estructurada de ambos NRC.",
-                        "is_main_alert": True,
-                    }
-                ],
+                "metadata": {
+                    "course_code": "2207",
+                    "course_name": "TERMODINAMICA",
+                    "nrc": "7542",
+                    "semester": "202610",
+                    "academic_period": "202610",
+                    "source_file": "202610-ING-2207-NRC-7542-TERMODINAMICA.pdf",
+                },
+                "sections": {
+                    "evaluaciones_y_ponderaciones": {
+                        "found": True,
+                        "page_numbers": [6],
+                        "raw_evidence": "Pruebas 30, Examen 70",
+                        "structured_data": {
+                            "evaluations": [
+                                {
+                                    "type": "Pruebas",
+                                    "quantity": 3,
+                                    "weight_total": 30,
+                                    "weight_each": 10,
+                                    "description": "3 pruebas",
+                                }
+                            ]
+                        },
+                    },
+                    "requisitos_aprobacion": {
+                        "found": True,
+                        "page_numbers": [8],
+                        "raw_evidence": "Nota mínima de aprobación 4.0",
+                        "structured_data": {
+                            "minimum_final_grade": 4.0,
+                            "minimum_exam_grade": 3.0,
+                            "automatic_failure_rules": [],
+                            "grade_cap_rules": [],
+                            "attendance_rules": [],
+                        },
+                    },
+                    "criterios_eximicion": {
+                        "found": True,
+                        "page_numbers": [8],
+                        "raw_evidence": "Promedio igual o superior a 5,5",
+                        "structured_data": {
+                            "is_available": True,
+                            "threshold": 5.5,
+                            "conditions": ["Promedio igual o superior a 5,5"],
+                        },
+                    },
+                    "nota_final": {
+                        "found": True,
+                        "page_numbers": [9],
+                        "raw_evidence": "NF = 0.7 NP + 0.3 EX",
+                        "structured_data": {
+                            "presentation_grade_formula": "NP = ...",
+                            "final_grade_formula": "NF = 0.7 NP + 0.3 EX",
+                            "presentation_weight": 70,
+                            "exam_weight": 30,
+                        },
+                    },
+                },
+                "warnings": [],
             }
 
         return {
-            "section_name": "Criterios de Eximición",
-            "section_found": True,
-            "confidence": 0.9,
-            "relevant_excerpt": "Eximición con promedio igual o superior a 5,5.",
-            "extracted_variables": [
+            "course": {
+                "course_code": "2207",
+                "course_name": "TERMODINAMICA",
+                "nrcs_compared": ["7542", "7543"],
+            },
+            "summary": {
+                "total_syllabus_compared": 2,
+                "total_inconsistencies": 1,
+                "most_deviating_nrc": "7543",
+                "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
+                "possible_outlier": {"nrc": "7543", "alerts": 1, "reason": "Mayor diferencia"},
+                "analysis_mode": "group_pattern",
+            },
+            "inconsistencies": [
                 {
-                    "name": "Umbral de eximición",
-                    "value": "5,5",
-                    "normalized_value": "5.5",
-                    "evidence": "promedio igual o superior a 5,5",
-                    "academic_relevance": "Define eximición de examen.",
+                    "section": "criterios_eximicion",
+                    "variable": "threshold",
+                    "severity": "critica",
+                    "description": "Un NRC exige 5.8 y otro 5.5.",
+                    "values_by_nrc": {"7542": 5.5, "7543": 5.8},
+                    "majority_value": 5.5,
+                    "outlier_nrcs": ["7543"],
+                    "evidence": [
+                        {"nrc": "7542", "page": 8, "text": "Promedio igual o superior a 5,5"},
+                        {"nrc": "7543", "page": 8, "text": "Promedio igual o superior a 5,8"},
+                    ],
+                    "suggested_action": "Revisar el umbral de eximición del NRC 7543.",
                 }
             ],
-            "missing_or_ambiguous_elements": [],
-            "academic_interpretation": "Regla explícita de eximición.",
+            "warnings": [],
         }
 
 
-def test_ai_analyzer_uses_section_prompts_and_comparison_prompt(monkeypatch):
+def test_ai_analyzer_uses_one_extraction_per_syllabus_and_one_global_comparison(monkeypatch):
     class FakeSettings:
         ai_max_pdf_text_chars = 5000
         local_model = "qwen2.5:14b"
@@ -86,36 +140,40 @@ def test_ai_analyzer_uses_section_prompts_and_comparison_prompt(monkeypatch):
         FakeSyllabus(
             "7542",
             """
+--- Página 1 ---
+Información de la Asignatura
+Carrera: ING
+--- Página 6 ---
 Evaluaciones y Ponderaciones
 Pruebas 30
-Cronograma de Actividades
-Semana 1
+--- Página 8 ---
 Requisitos de Aprobación
 Nota mínima 4.0
 Criterios de Eximición
 Promedio igual o superior a 5,5
+--- Página 9 ---
 Nota Final de la Asignatura
 NF = 0.7 NP + 0.3 EX
-Recursos de Aprendizaje - Bibliografía Básica
-Libro base
-""",
+""".strip(),
         ),
         FakeSyllabus(
             "7543",
             """
+--- Página 1 ---
+Información de la Asignatura
+Carrera: ING
+--- Página 6 ---
 Evaluaciones y Ponderaciones
 Pruebas 30
-Cronograma de Actividades
-Semana 1
+--- Página 8 ---
 Requisitos de Aprobación
 Nota mínima 4.0
 Criterios de Eximición
 Promedio igual o superior a 5,8
+--- Página 9 ---
 Nota Final de la Asignatura
 NF = 0.7 NP + 0.3 EX
-Recursos de Aprendizaje - Bibliografía Básica
-Libro base
-""",
+""".strip(),
         ),
     ]
 
@@ -130,156 +188,124 @@ Libro base
         max_text_chars=5000,
     )
 
-    section_calls = [call for call in client.calls if call["schema_name"].endswith("_extraction")]
-    comparison_calls = [
-        call for call in client.calls if call["schema_name"].endswith("_comparison_report")
-    ]
+    extraction_calls = [call for call in client.calls if call["schema_name"] == "syllabus_extraction"]
+    comparison_calls = [call for call in client.calls if call["schema_name"] == "syllabus_comparison"]
 
-    assert len(section_calls) == 0
-    assert len(comparison_calls) == 4
-    assert result["summary"]["analysis_provider"] == "ollama"
-    assert result["summary"]["severity_counts"]["Crítica"] == 4
-    assert result["inconsistencies"][0]["variable"] == "Umbral de eximición"
+    assert len(extraction_calls) == 2
+    assert len(comparison_calls) == 1
+    assert result["summary"]["course"]["course_code"] == "2207"
+    assert result["summary"]["severity_counts"]["Crítica"] == 1
+    assert result["summary"]["possible_outlier"]["nrc"] == "7543"
+    assert result["inconsistencies"][0]["severity"] == "critica"
 
 
-def test_comparison_prompt_uses_section_recortes():
-    prompt = _comparison_user_prompt_for_section(
-        {"academic_period": "202610", "course_code": "2207", "course_name": "TERMODINAMICA"},
-        "evaluations",
-        "Evaluaciones y Ponderaciones",
-        {
-            "7542": {
-                "metadata": {"nrc": "7542"},
-                "sections": {
-                    "evaluations": {
-                        "section_name": "Evaluaciones y Ponderaciones",
-                        "source_excerpt": "Evaluaciones y Ponderaciones\nPruebas | 10 | Prueba 1",
-                        "source_strategy": "keyword_window",
-                        "extracted_variables": [{"name": "Prueba 1", "value": "10"}],
-                        "missing_or_ambiguous_elements": [],
-                        "academic_interpretation": "Tabla de evaluaciones",
-                    }
+def test_compare_normalized_syllabi_fills_missing_summary_fields():
+    class MinimalClient:
+        def complete_json(self, *, system_prompt, user_prompt, schema_name, schema):
+            return {
+                "course": {
+                    "course_code": "2207",
+                    "course_name": "TERMODINAMICA",
+                    "nrcs_compared": ["7542", "7543"],
                 },
+                "summary": {
+                    "total_syllabus_compared": 2,
+                    "total_inconsistencies": 1,
+                    "most_deviating_nrc": None,
+                    "severity_counts": {"critica": 0, "moderada": 0, "menor": 0},
+                    "possible_outlier": None,
+                    "analysis_mode": "group_pattern",
+                },
+                "inconsistencies": [
+                    {
+                        "section": "requisitos_aprobacion",
+                        "variable": "minimum_exam_grade",
+                        "severity": "Critica",
+                        "description": "Un NRC exige 3.5 y otro 3.0.",
+                        "values_by_nrc": {"7542": 3.0, "7543": 3.5},
+                        "majority_value": None,
+                        "outlier_nrcs": [],
+                        "evidence": [],
+                        "suggested_action": "Revisar la regla de examen.",
+                    }
+                ],
+                "warnings": [],
             }
+
+    result = compare_normalized_syllabi(
+        course_metadata={"course_code": "2207", "course_name": "TERMODINAMICA"},
+        normalized_syllabi_by_nrc={
+            "7542": {"metadata": {}, "sections": {}, "warnings": []},
+            "7543": {"metadata": {}, "sections": {}, "warnings": []},
         },
+        ai_client=MinimalClient(),
     )
 
-    assert "Texto del mismo apartado extraído localmente" in prompt
-    assert "Pruebas | 10 | Prueba 1" in prompt
-    assert "evaluations" in prompt
+    assert result["summary"]["most_deviating_nrc"] == "7543"
+    assert result["summary"]["possible_outlier"]["nrc"] == "7543"
+    assert result["inconsistencies"][0]["majority_value"] == 3.0
+    assert result["inconsistencies"][0]["severity"] == "critica"
 
 
-def test_equivalent_evaluation_weight_order_is_not_reported_as_alert():
-    comparison = {
-        "analysis_mode": "pairwise",
-        "compared_nrcs": ["7587", "7588"],
-        "overall_summary": "Se detectó una diferencia en ponderaciones.",
-        "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
-        "possible_outlier": {"nrc": "", "alert_count": 0, "reason": ""},
-        "inconsistencies": [
-            {
-                "section": "Evaluaciones y Ponderaciones",
-                "variable": "Ponderación de Pruebas",
-                "difference": (
-                    "NRC 7587: 30% Examen Final, 52.5% Pruebas "
-                    "NRC 7588: 52.5% Pruebas, 30% Examen Final"
-                ),
-                "involved_nrcs": ["7587", "7588"],
-                "severity": "Crítica",
-                "priority_rationale": "Afecta evaluación.",
-                "suggestion": "Revisar y unificar las ponderaciones.",
-                "evidence": "Extracción del apartado.",
-                "is_main_alert": True,
+def test_compare_normalized_syllabi_discards_equivalent_rules_and_values():
+    class EquivalentClient:
+        def complete_json(self, *, system_prompt, user_prompt, schema_name, schema):
+            return {
+                "course": {
+                    "course_code": "2207",
+                    "course_name": "TERMODINAMICA",
+                    "nrcs_compared": ["7587", "7588"],
+                },
+                "summary": {
+                    "total_syllabus_compared": 2,
+                    "total_inconsistencies": 1,
+                    "most_deviating_nrc": "7588",
+                    "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
+                    "possible_outlier": {"nrc": "7588", "alerts": 1, "reason": "Mayor diferencia"},
+                    "analysis_mode": "group_pattern",
+                },
+                "inconsistencies": [
+                    {
+                        "section": "requisitos_aprobacion",
+                        "variable": "minimum_final_grade",
+                        "severity": "critica",
+                        "description": "Different minimum final grade requirements: NRC 7587: 4.0, NRC 7588: 4.0",
+                        "values_by_nrc": {"7587": 4.0, "7588": 4.0},
+                        "majority_value": 4.0,
+                        "outlier_nrcs": ["7588"],
+                        "evidence": [
+                            {"nrc": "7587", "page": 8, "text": "Minimum final grade 4.0"},
+                            {"nrc": "7588", "page": 8, "text": "Minimum final grade 4.0"},
+                        ],
+                        "suggested_action": "Review the minimum final grade policy.",
+                    },
+                    {
+                        "section": "requisitos_aprobacion",
+                        "variable": "automatic_failure_rules",
+                        "severity": "critica",
+                        "description": "Different automatic failure rules",
+                        "values_by_nrc": {
+                            "7587": "If the final grade is less than 3.0, the course is failed.",
+                            "7588": "If final grade is less than 3.0, the course is failed.",
+                        },
+                        "majority_value": "If the final grade is less than 3.0, the course is failed.",
+                        "outlier_nrcs": ["7588"],
+                        "evidence": [],
+                        "suggested_action": "Review the automatic failure rules.",
+                    },
+                ],
+                "warnings": [],
             }
-        ],
-    }
 
-    result = _combine_section_comparisons([comparison], ["7587", "7588"])
-
-    assert result["inconsistencies"] == []
-    assert result["severity_counts"] == {"critica": 0, "moderada": 0, "menor": 0}
-    assert result["possible_outlier"]["nrc"] == ""
-    assert "No se detectaron diferencias relevantes" in result["overall_summary"]
-
-
-def test_same_approval_rule_is_not_reported_as_alert():
-    comparison = {
-        "analysis_mode": "pairwise",
-        "compared_nrcs": ["7587", "7588"],
-        "overall_summary": "Se detectó una diferencia en requisitos de aprobación.",
-        "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
-        "possible_outlier": {"nrc": "", "alert_count": 0, "reason": ""},
-        "inconsistencies": [
-            {
-                "section": "Requisitos de Aprobación",
-                "variable": "Nota mínima de aprobación",
-                "difference": (
-                    "NRC 7588: nota final mayor o igual a 4 "
-                    "NRC 7587: nota final mayor o igual a 4"
-                ),
-                "involved_nrcs": ["7587", "7588"],
-                "severity": "Crítica",
-                "priority_rationale": "Afecta aprobación.",
-                "suggestion": "Revisar requisitos de aprobación.",
-                "evidence": "Ambos textos indican la misma regla.",
-                "is_main_alert": True,
-            }
-        ],
-    }
-
-    result = _combine_section_comparisons([comparison], ["7587", "7588"])
-
-    assert result["inconsistencies"] == []
-    assert result["severity_counts"] == {"critica": 0, "moderada": 0, "menor": 0}
-    assert result["possible_outlier"]["nrc"] == ""
-
-
-def test_extract_sections_from_text_uses_heading_boundaries():
-    text = """
---- Página 1 ---
-Información de la Asignatura
-Carrera: ING
-Información del Instructor
-Docente Uno
-Evaluaciones y Ponderaciones
-Tipo Ponderación
-Pruebas 30
-Cronograma de Actividades
-Semana 1
-Requisitos de Aprobación
-Nota mínima 4.0
-Nota Final de la Asignatura
-NF = 0.7 NP + 0.3 EX
-Recursos de Aprendizaje - Bibliografía Básica
-Libro base
-""".strip()
-
-    sections = extract_sections_from_text(text, 5000)
-
-    assert sections["evaluations"]["section_found"] is True
-    assert "Pruebas 30" in sections["evaluations"]["source_excerpt"]
-    assert "Cronograma de Actividades" not in sections["evaluations"]["source_excerpt"]
-    assert sections["final_grade"]["source_strategy"] == "heading_boundaries"
-
-
-def test_empty_section_returns_placeholder_result(monkeypatch):
-    from app.services.ai_analyzer import _extract_section_result
-
-    class EmptySyllabus(FakeSyllabus):
-        def __init__(self):
-            super().__init__("7542", "")
-
-    class NeverCalledClient:
-        def complete_json(self, **kwargs):
-            raise AssertionError("The model should not be called for empty sections")
-
-    result = _extract_section_result(
-        NeverCalledClient(),
-        EmptySyllabus(),
-        type("SectionPromptLike", (), {"key": "evaluations", "name": "Evaluaciones y Ponderaciones"})(),
-        1000,
+    result = compare_normalized_syllabi(
+        course_metadata={"course_code": "2207", "course_name": "TERMODINAMICA"},
+        normalized_syllabi_by_nrc={
+            "7587": {"metadata": {}, "sections": {}, "warnings": []},
+            "7588": {"metadata": {}, "sections": {}, "warnings": []},
+        },
+        ai_client=EquivalentClient(),
     )
 
-    assert result["section_found"] is False
-    assert result["source_strategy"] == "missing"
-    assert result["extracted_variables"] == []
+    assert result["inconsistencies"] == []
+    assert result["summary"]["total_inconsistencies"] == 0
+    assert result["summary"]["severity_counts"] == {"Crítica": 0, "Moderada": 0, "Menor": 0}
