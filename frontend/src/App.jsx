@@ -1,14 +1,16 @@
 import {
   AlertTriangle,
-  ChevronRight,
+  ArrowLeft,
+  BookOpen,
   FileArchive,
   FileText,
   Loader2,
   PlayCircle,
   RefreshCcw,
   Upload,
+  X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   analyzeCourse,
   getCourse,
@@ -18,304 +20,498 @@ import {
   uploadZip,
 } from "./api";
 
-function groupByPeriod(courses) {
-  return courses.reduce((acc, course) => {
-    acc[course.academic_period] = acc[course.academic_period] || [];
-    acc[course.academic_period].push(course);
-    return acc;
-  }, {});
+// ─── Color palette for course cards ─────────────────────────────────────────
+const PALETTE = [
+  { bg: "#e8f5e9", border: "#66bb6a", accent: "#2e7d32" },
+  { bg: "#e3f2fd", border: "#64b5f6", accent: "#1565c0" },
+  { bg: "#fce4ec", border: "#f48fb1", accent: "#880e4f" },
+  { bg: "#fff8e1", border: "#ffca28", accent: "#e65100" },
+  { bg: "#f3e5f5", border: "#ce93d8", accent: "#4a148c" },
+  { bg: "#e0f7fa", border: "#4dd0e1", accent: "#006064" },
+  { bg: "#f9fbe7", border: "#aed581", accent: "#33691e" },
+  { bg: "#fbe9e7", border: "#ff8a65", accent: "#bf360c" },
+];
+
+function courseColor(id) {
+  return PALETTE[id % PALETTE.length];
 }
 
+// ─── Shared: Severity badge ──────────────────────────────────────────────────
 function SeverityBadge({ severity }) {
-  const className = `severity severity-${severity?.toLowerCase() || "none"}`;
-  return <span className={className}>{severity || "Sin nivel"}</span>;
+  const cls = `severity severity-${severity?.toLowerCase() || "none"}`;
+  return <span className={cls}>{severity || "Sin nivel"}</span>;
 }
 
-function EmptyState() {
-  return (
-    <section className="empty-state">
-      <FileArchive size={36} aria-hidden="true" />
-      <h2>No hay syllabus cargados</h2>
-      <p>Sube un ZIP con archivos PDF para crear grupos por periodo y código de curso.</p>
-    </section>
-  );
-}
-
-function UploadPanel({ onUploaded }) {
-  const [file, setFile] = useState(null);
+// ═══════════════════════════════════════════════════════════════════════════════
+// UPLOAD ZONE  (supports multiple files)
+// ═══════════════════════════════════════════════════════════════════════════════
+function UploadZone({ onUploaded }) {
+  const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [results, setResults] = useState([]);
+  const [errors, setErrors] = useState([]);
+
+  function addFiles(selected) {
+    setFiles((prev) => {
+      const names = new Set(prev.map((f) => f.name));
+      return [...prev, ...selected.filter((f) => !names.has(f.name))];
+    });
+  }
+
+  function removeFile(index) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (!file) return;
-
+    if (!files.length) return;
     setUploading(true);
-    setError(null);
-    try {
-      const response = await uploadZip(file);
-      setResult(response);
-      await onUploaded(response.course_ids?.[0]);
-    } catch (exc) {
-      setError(exc.message);
-    } finally {
-      setUploading(false);
+    setResults([]);
+    setErrors([]);
+    const newResults = [];
+    const newErrors = [];
+    for (const file of files) {
+      try {
+        const res = await uploadZip(file);
+        newResults.push(res);
+      } catch (exc) {
+        newErrors.push(`${file.name}: ${exc.message}`);
+      }
     }
+    setResults(newResults);
+    setErrors(newErrors);
+    setFiles([]);
+    setUploading(false);
+    await onUploaded();
   }
 
-  return (
-    <section className="upload-panel" aria-label="Carga de ZIP">
-      <form onSubmit={handleSubmit} className="upload-form">
-        <label className="file-input">
-          <Upload size={18} aria-hidden="true" />
-          <span>{file ? file.name : "Seleccionar ZIP"}</span>
-          <input
-            type="file"
-            accept=".zip,application/zip"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
-          />
-        </label>
-        <button type="submit" className="primary-button" disabled={!file || uploading}>
-          {uploading ? <Loader2 className="spin" size={18} /> : <Upload size={18} />}
-          Subir ZIP
-        </button>
-      </form>
+  const allRejected = results.flatMap((r) => r.rejected_files || []);
 
-      {error && <p className="message error">{error}</p>}
-      {result && (
-        <div className="upload-result">
-          <span>{result.message}</span>
-          <span>{result.rejected_count} rechazados</span>
+  return (
+    <div className="upload-zone">
+      <div className="upload-zone-inner">
+        <FileArchive size={26} className="upload-zone-icon" aria-hidden="true" />
+        <div className="upload-zone-text">
+          <p>Arrastra archivos ZIP aquí o</p>
+          <label className="upload-link">
+            selecciona archivos
+            <input
+              type="file"
+              accept=".zip,application/zip"
+              multiple
+              onChange={(e) => {
+                addFiles(Array.from(e.target.files || []));
+                e.target.value = "";
+              }}
+            />
+          </label>
         </div>
-      )}
-      {result?.rejected_files?.length > 0 && (
-        <ul className="rejected-list">
-          {result.rejected_files.map((item) => (
-            <li key={`${item.filename}-${item.reason}`}>
-              <strong>{item.filename}</strong>: {item.reason}
+      </div>
+
+      {files.length > 0 && (
+        <ul className="file-queue">
+          {files.map((f, i) => (
+            <li key={f.name}>
+              <FileArchive size={14} aria-hidden="true" />
+              <span>{f.name}</span>
+              <button
+                type="button"
+                className="remove-file"
+                onClick={() => removeFile(i)}
+                aria-label={`Quitar ${f.name}`}
+              >
+                <X size={14} />
+              </button>
             </li>
           ))}
         </ul>
       )}
-    </section>
-  );
-}
 
-function CourseTable({ courses, selectedCourseId, onSelect }) {
-  const grouped = useMemo(() => groupByPeriod(courses), [courses]);
-  const periods = Object.keys(grouped).sort().reverse();
+      {files.length > 0 && (
+        <form onSubmit={handleSubmit}>
+          <button className="primary-button upload-submit" disabled={uploading}>
+            {uploading ? <Loader2 className="spin" size={18} /> : <Upload size={18} />}
+            {uploading
+              ? "Procesando…"
+              : `Subir ${files.length} archivo${files.length !== 1 ? "s" : ""}`}
+          </button>
+        </form>
+      )}
 
-  if (!courses.length) return <EmptyState />;
-
-  return (
-    <section className="course-list" aria-label="Cursos agrupados">
-      {periods.map((period) => (
-        <div key={period} className="period-group">
-          <div className="period-heading">
-            <h2>{period}</h2>
-            <span>{grouped[period].length} cursos</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Código</th>
-                  <th>Curso</th>
-                  <th>Carrera</th>
-                  <th>Syllabus</th>
-                  <th>Reporte</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {grouped[period].map((course) => (
-                  <tr
-                    key={course.id}
-                    className={selectedCourseId === course.id ? "selected-row" : ""}
-                    onClick={() => onSelect(course.id)}
-                  >
-                    <td className="mono">{course.course_code}</td>
-                    <td>{course.course_name}</td>
-                    <td>{course.career}</td>
-                    <td>{course.syllabus_count}</td>
-                    <td>{course.latest_report_id ? "Generado" : "Pendiente"}</td>
-                    <td className="row-action">
-                      <ChevronRight size={18} aria-hidden="true" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function CourseDetail({ course, report, analyzing, onAnalyze, onLoadReport }) {
-  if (!course) {
-    return (
-      <aside className="detail-panel">
-        <div className="placeholder">Selecciona un curso para revisar sus syllabus.</div>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="detail-panel">
-      <div className="detail-header">
-        <div>
-          <p className="eyebrow">{course.academic_period} · {course.career}</p>
-          <h2>{course.course_code}</h2>
-          <p>{course.course_name}</p>
-        </div>
-        <button className="primary-button" onClick={onAnalyze} disabled={analyzing}>
-          {analyzing ? <Loader2 className="spin" size={18} /> : <PlayCircle size={18} />}
-          Analizar
-        </button>
-      </div>
-
-      <section className="detail-section">
-        <div className="section-title">
-          <h3>Syllabus asociados</h3>
-          {course.latest_report_id && (
-            <button className="ghost-button" onClick={onLoadReport}>
-              <RefreshCcw size={16} />
-              Ver último reporte
-            </button>
-          )}
-        </div>
-        <div className="syllabus-list">
-          {course.syllabi.map((syllabus) => (
-            <a
-              key={syllabus.id}
-              className="syllabus-item"
-              href={syllabusDownloadUrl(syllabus.id)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <FileText size={18} aria-hidden="true" />
-              <span>
-                <strong>NRC {syllabus.nrc}</strong>
-                <small>{syllabus.original_filename}</small>
-              </span>
-              <em>{syllabus.extraction_status}</em>
-            </a>
+      {(results.length > 0 || errors.length > 0) && (
+        <div className="upload-feedback">
+          {results.map((res, i) => (
+            <p key={i} className="message ok">
+              {res.message}
+            </p>
+          ))}
+          {allRejected.map((item) => (
+            <p key={`${item.filename}-${item.reason}`} className="message warn">
+              <strong>{item.filename}</strong>: {item.reason}
+            </p>
+          ))}
+          {errors.map((e, i) => (
+            <p key={i} className="message error">
+              {e}
+            </p>
           ))}
         </div>
-      </section>
-
-      {report && <ReportView report={report} />}
-    </aside>
+      )}
+    </div>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// COURSE CARD
+// ═══════════════════════════════════════════════════════════════════════════════
+function CourseCard({ course, onClick }) {
+  const color = courseColor(course.id);
+  const hasReport = !!course.latest_report_id;
+
+  return (
+    <button
+      className="course-card"
+      style={{
+        "--card-bg": color.bg,
+        "--card-border": color.border,
+        "--card-accent": color.accent,
+      }}
+      onClick={onClick}
+      aria-label={`Abrir curso ${course.course_name}`}
+    >
+      <div className="card-top-bar" />
+      <div className="card-body">
+        <div className="card-code">{course.course_code}</div>
+        <div className="card-name">{course.course_name}</div>
+        <div className="card-meta">
+          <span className="card-chip">{course.academic_period}</span>
+          <span className="card-chip">{course.career}</span>
+        </div>
+      </div>
+      <div className="card-footer">
+        <span className="card-count">
+          <FileText size={13} aria-hidden="true" />
+          {course.syllabus_count} syllabus
+        </span>
+        <span className={`card-status ${hasReport ? "card-status--done" : ""}`}>
+          {hasReport ? "Analizado" : "Pendiente"}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HOME VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+function HomeView({ courses, loading, onOpenCourse, onRefresh }) {
+  return (
+    <div className="home-view">
+      <header className="app-header">
+        <div>
+          <h1>Revisión de Syllabus</h1>
+          <p className="header-sub">
+            Detecta inconsistencias entre secciones de un mismo curso
+          </p>
+        </div>
+        <button className="ghost-button" onClick={onRefresh} disabled={loading}>
+          {loading ? <Loader2 className="spin" size={18} /> : <RefreshCcw size={18} />}
+          Actualizar
+        </button>
+      </header>
+
+      <UploadZone onUploaded={onRefresh} />
+
+      <div className="courses-section">
+        <div className="courses-section-header">
+          <h2>
+            <BookOpen size={18} aria-hidden="true" />
+            Cursos
+          </h2>
+          {courses.length > 0 && (
+            <span className="courses-count">{courses.length} cursos</span>
+          )}
+        </div>
+
+        {loading && courses.length === 0 ? (
+          <div className="loading-state">
+            <Loader2 className="spin" size={28} />
+            <p>Cargando cursos…</p>
+          </div>
+        ) : courses.length === 0 ? (
+          <div className="empty-state">
+            <FileArchive size={36} aria-hidden="true" />
+            <h3>No hay cursos cargados</h3>
+            <p>Sube un archivo ZIP con syllabus en PDF para comenzar.</p>
+          </div>
+        ) : (
+          <div className="course-grid">
+            {courses.map((course) => (
+              <CourseCard
+                key={course.id}
+                course={course}
+                onClick={() => onOpenCourse(course.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REPORT VIEW  (grouped by section)
+// ═══════════════════════════════════════════════════════════════════════════════
 function ReportView({ report }) {
-  const course = report.summary?.course || {};
   const counts = report.summary?.severity_counts || {};
   const outlier = report.summary?.possible_outlier;
+
+  // Group inconsistencies by section
+  const bySection = report.inconsistencies.reduce((acc, item) => {
+    (acc[item.section] = acc[item.section] || []).push(item);
+    return acc;
+  }, {});
+  const sections = Object.entries(bySection);
 
   return (
     <section className="report">
       <div className="report-header">
-        <div>
-          <h3>Reporte comparativo</h3>
-        </div>
+        <h3>Reporte comparativo</h3>
         <span className="time">{report.processing_time_seconds}s</span>
       </div>
 
       <div className="severity-summary">
-        <span>Críticas: {counts.Crítica || 0}</span>
-        <span>Moderadas: {counts.Moderada || 0}</span>
-        <span>Menores: {counts.Menor || 0}</span>
+        <span className="sev-chip sev-critica">
+          Críticas: {counts.Crítica ?? counts.critica ?? 0}
+        </span>
+        <span className="sev-chip sev-moderada">
+          Moderadas: {counts.Moderada ?? counts.moderada ?? 0}
+        </span>
+        <span className="sev-chip sev-menor">
+          Menores: {counts.Menor ?? counts.menor ?? 0}
+        </span>
       </div>
 
-      {outlier && (
+      {outlier?.nrc && (
         <div className="outlier">
-          <AlertTriangle size={18} aria-hidden="true" />
-          NRC {outlier.nrc} se aleja más del patrón del grupo ({outlier.alerts} alertas).
+          <AlertTriangle size={17} aria-hidden="true" />
+          NRC {outlier.nrc} se aleja más del patrón del grupo (
+          {outlier.alert_count ?? outlier.alerts ?? "?"} alertas).
         </div>
       )}
 
       {report.inconsistencies.length === 0 ? (
-        <p className="message ok">No se detectaron inconsistencias principales para los apartados del MVP.</p>
+        <p className="message ok">
+          No se detectaron inconsistencias principales para los apartados del MVP.
+        </p>
       ) : (
-        <div className="report-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Apartado</th>
-                <th>Variable</th>
-                <th>Diferencia detectada</th>
-                <th>NRC</th>
-                <th>Gravedad</th>
-                <th>Sugerencia</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.inconsistencies.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.section}</td>
-                  <td>{item.variable}</td>
-                  <td>{item.difference}</td>
-                  <td>{item.involved_nrcs.join(", ")}</td>
-                  <td><SeverityBadge severity={item.severity} /></td>
-                  <td>{item.suggestion}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="report-sections">
+          {sections.map(([section, items]) => (
+            <div key={section} className="report-section-group">
+              <h4 className="report-section-name">{section}</h4>
+              <div className="inconsistency-list">
+                {items.map((item) => (
+                  <div key={item.id} className="inconsistency-card">
+                    <div className="inconsistency-header">
+                      <SeverityBadge severity={item.severity} />
+                      <span className="inconsistency-variable">{item.variable}</span>
+                      <span className="inconsistency-nrcs">
+                        NRC: {item.involved_nrcs.join(", ")}
+                      </span>
+                    </div>
+                    <p className="inconsistency-diff">{item.difference}</p>
+                    {item.suggestion && (
+                      <p className="inconsistency-suggestion">{item.suggestion}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </section>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// DETAIL VIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+function DetailView({ course, report, analyzing, loading, onBack, onAnalyze, onLoadReport }) {
+  const color = course ? courseColor(course.id) : PALETTE[0];
+
+  return (
+    <div className="detail-view">
+      {/* Sticky nav */}
+      <nav className="detail-nav">
+        <button className="back-button" onClick={onBack}>
+          <ArrowLeft size={17} />
+          Todos los cursos
+        </button>
+      </nav>
+
+      {loading || !course ? (
+        <div className="loading-state" style={{ paddingTop: "80px" }}>
+          <Loader2 className="spin" size={30} />
+          <p>Cargando curso…</p>
+        </div>
+      ) : (
+        <>
+          {/* Course header */}
+          <div
+            className="detail-header"
+            style={{
+              "--card-bg": color.bg,
+              "--card-border": color.border,
+              "--card-accent": color.accent,
+            }}
+          >
+            <div className="detail-header-bar" />
+            <div className="detail-header-content">
+              <div className="detail-meta">
+                <span>{course.academic_period}</span>
+                <span>{course.career}</span>
+              </div>
+              <h1 className="detail-code">{course.course_code}</h1>
+              <p className="detail-name">{course.course_name}</p>
+            </div>
+            <div className="detail-actions">
+              <button
+                className="primary-button"
+                onClick={onAnalyze}
+                disabled={analyzing}
+              >
+                {analyzing ? (
+                  <Loader2 className="spin" size={18} />
+                ) : (
+                  <PlayCircle size={18} />
+                )}
+                {analyzing ? "Analizando…" : "Analizar"}
+              </button>
+              {course.latest_report_id && !analyzing && (
+                <button className="ghost-button" onClick={onLoadReport}>
+                  <RefreshCcw size={16} />
+                  Ver último reporte
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Body: syllabi (left) + report (right) */}
+          <div className="detail-body">
+            <aside className="detail-sidebar">
+              <h3>
+                Syllabus asociados
+                <span className="sidebar-count">{course.syllabi.length}</span>
+              </h3>
+              <div className="syllabus-list">
+                {course.syllabi.map((s) => (
+                  <a
+                    key={s.id}
+                    className="syllabus-item"
+                    href={syllabusDownloadUrl(s.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <FileText size={17} aria-hidden="true" />
+                    <span>
+                      <strong>NRC {s.nrc}</strong>
+                      <small>{s.original_filename}</small>
+                    </span>
+                    <em>{s.extraction_status}</em>
+                  </a>
+                ))}
+              </div>
+            </aside>
+
+            <main className="detail-main">
+              {analyzing ? (
+                <div className="analyzing-state">
+                  <Loader2 className="spin" size={26} />
+                  <p>
+                    Analizando syllabus con IA local…
+                    <br />
+                    <small>Esto puede tardar unos minutos.</small>
+                  </p>
+                </div>
+              ) : report ? (
+                <ReportView report={report} />
+              ) : (
+                <div className="no-report-state">
+                  <PlayCircle size={32} aria-hidden="true" />
+                  <p>
+                    Presiona <strong>Analizar</strong> para comparar los syllabus de este
+                    curso.
+                  </p>
+                </div>
+              )}
+            </main>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
+  const [view, setView] = useState("home");
   const [courses, setCourses] = useState([]);
-  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [activeCourse, setActiveCourse] = useState(null);
   const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingCourses, setLoadingCourses] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState(null);
 
-  async function refreshCourses(selectCourseId = selectedCourse?.id) {
-    setLoading(true);
+  async function refreshCourses() {
+    setLoadingCourses(true);
     setError(null);
     try {
-      const response = await listCourses();
-      setCourses(response);
-      if (selectCourseId) {
-        await selectCourse(selectCourseId, false);
-      }
+      const data = await listCourses();
+      setCourses(data);
     } catch (exc) {
       setError(exc.message);
     } finally {
-      setLoading(false);
+      setLoadingCourses(false);
     }
   }
 
-  async function selectCourse(courseId, clearReport = true) {
+  async function openCourse(courseId) {
+    setView("detail");
+    setLoadingDetail(true);
+    setReport(null);
     setError(null);
-    if (clearReport) setReport(null);
     try {
       const course = await getCourse(courseId);
-      setSelectedCourse(course);
+      setActiveCourse(course);
     } catch (exc) {
       setError(exc.message);
+      setView("home");
+    } finally {
+      setLoadingDetail(false);
     }
+  }
+
+  function goHome() {
+    setView("home");
+    setActiveCourse(null);
+    setReport(null);
+    refreshCourses();
   }
 
   async function handleAnalyze() {
-    if (!selectedCourse) return;
+    if (!activeCourse) return;
     setAnalyzing(true);
     setError(null);
     try {
-      const response = await analyzeCourse(selectedCourse.id);
-      setReport(response);
-      await refreshCourses(selectedCourse.id);
+      const result = await analyzeCourse(activeCourse.id);
+      setReport(result);
+      const updated = await getCourse(activeCourse.id);
+      setActiveCourse(updated);
     } catch (exc) {
       setError(exc.message);
     } finally {
@@ -324,51 +520,46 @@ export default function App() {
   }
 
   async function loadLatestReport() {
-    if (!selectedCourse) return;
+    if (!activeCourse) return;
     setError(null);
     try {
-      const response = await getLatestReport(selectedCourse.id);
-      setReport(response);
+      const result = await getLatestReport(activeCourse.id);
+      setReport(result);
     } catch (exc) {
       setError(exc.message);
     }
   }
 
   useEffect(() => {
-    refreshCourses(null);
+    refreshCourses();
   }, []);
 
   return (
-    <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Revisión comparativa de syllabus</h1>
+    <div className="app-shell">
+      {error && (
+        <div className="global-error">
+          <p className="message error">{error}</p>
         </div>
-        <button className="ghost-button" onClick={() => refreshCourses()} disabled={loading}>
-          {loading ? <Loader2 className="spin" size={18} /> : <RefreshCcw size={18} />}
-          Actualizar
-        </button>
-      </header>
+      )}
 
-      <UploadPanel onUploaded={(courseId) => refreshCourses(courseId)} />
-
-      {error && <p className="message error">{error}</p>}
-
-      <div className="workspace">
-        <CourseTable
+      {view === "home" ? (
+        <HomeView
           courses={courses}
-          selectedCourseId={selectedCourse?.id}
-          onSelect={selectCourse}
+          loading={loadingCourses}
+          onOpenCourse={openCourse}
+          onRefresh={refreshCourses}
         />
-        <CourseDetail
-          course={selectedCourse}
+      ) : (
+        <DetailView
+          course={activeCourse}
           report={report}
           analyzing={analyzing}
+          loading={loadingDetail}
+          onBack={goHome}
           onAnalyze={handleAnalyze}
           onLoadReport={loadLatestReport}
         />
-      </div>
-    </main>
+      )}
+    </div>
   );
 }
-
