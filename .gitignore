@@ -1,6 +1,7 @@
 # Secrets and local env
 .env
 .env.*
+!.env.example
 
 # Python cache and bytecode
 __pycache__/
@@ -35,3 +36,5 @@ Thumbs.db
 
 # Project outputs
 clima_errores.csv
+storage/
+debug_pdf_output/

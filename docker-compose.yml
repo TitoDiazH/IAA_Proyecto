@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: syllabus
+      POSTGRES_PASSWORD: syllabus
+      POSTGRES_DB: syllabus_review
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U syllabus -d syllabus_review"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://syllabus:syllabus@db:5432/syllabus_review
+      STORAGE_DIR: /app/storage
+      ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      MAX_UPLOAD_MB: 100
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
+      AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-300}
+      AI_MAX_PDF_TEXT_CHARS: 50000
+      AI_SECTION_CONCURRENCY: ${AI_SECTION_CONCURRENCY:-1}
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_storage:/app/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles:
+      - container-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/var/lib/ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres_data:
+  backend_storage:
+  ollama_data:

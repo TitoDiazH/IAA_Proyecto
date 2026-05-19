@@ -1,0 +1,41 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class Settings(BaseSettings):
+    app_name: str = "Syllabus Review MVP"
+    database_url: str = "postgresql+psycopg2://syllabus:syllabus@db:5432/syllabus_review"
+    storage_dir: Path = Path("./storage")
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    max_upload_mb: int = 100
+    ai_request_timeout_seconds: int = 300
+    ai_max_pdf_text_chars: int = 50000
+    ai_section_concurrency: int = 1
+    ollama_base_url: str = "http://localhost:11434"
+    local_llm_model: str = "qwen2.5:14b"
+
+    model_config = SettingsConfigDict(
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @property
+    def origins(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def local_model(self) -> str:
+        return self.local_llm_model
+
+
+@lru_cache
+def get_settings() -> Settings:
+    settings = Settings()
+    settings.storage_dir.mkdir(parents=True, exist_ok=True)
+    return settings
