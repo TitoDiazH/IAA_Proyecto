@@ -14,8 +14,6 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_upload_mb: int = 100
     ai_request_timeout_seconds: int = 300
-    ai_max_pdf_text_chars: int = 50000
-    ai_section_concurrency: int = 1
     ollama_base_url: str = "http://localhost:11434"
     local_llm_model: str = "qwen2.5:14b"
 

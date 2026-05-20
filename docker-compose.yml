@@ -28,8 +28,6 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
       AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-300}
-      AI_MAX_PDF_TEXT_CHARS: 50000
-      AI_SECTION_CONCURRENCY: ${AI_SECTION_CONCURRENCY:-1}
     ports:
       - "8000:8000"
     volumes:

@@ -1,4 +1,4 @@
-from app.services.ai_analyzer import analyze_syllabi_with_ai
+from app.services.ai_analyzer import analyze_syllabi
 from app.services.syllabus_comparator import compare_normalized_syllabi
 
 
@@ -13,6 +13,7 @@ class FakeSyllabus:
         self.term = "10"
         self.career = "ING"
         self.original_filename = f"202610-ING-2207-NRC-{nrc}-TERMODINAMICA.pdf"
+        self.stored_path = f"storage/{self.original_filename}"
         self.extraction_status = "ok"
 
 
@@ -29,70 +30,6 @@ class FakeAIClient:
                 "schema": schema,
             }
         )
-
-        if schema_name == "syllabus_extraction":
-            return {
-                "metadata": {
-                    "course_code": "2207",
-                    "course_name": "TERMODINAMICA",
-                    "nrc": "7542",
-                    "semester": "202610",
-                    "academic_period": "202610",
-                    "source_file": "202610-ING-2207-NRC-7542-TERMODINAMICA.pdf",
-                },
-                "sections": {
-                    "evaluaciones_y_ponderaciones": {
-                        "found": True,
-                        "page_numbers": [6],
-                        "raw_evidence": "Pruebas 30, Examen 70",
-                        "structured_data": {
-                            "evaluations": [
-                                {
-                                    "type": "Pruebas",
-                                    "quantity": 3,
-                                    "weight_total": 30,
-                                    "weight_each": 10,
-                                    "description": "3 pruebas",
-                                }
-                            ]
-                        },
-                    },
-                    "requisitos_aprobacion": {
-                        "found": True,
-                        "page_numbers": [8],
-                        "raw_evidence": "Nota mínima de aprobación 4.0",
-                        "structured_data": {
-                            "minimum_final_grade": 4.0,
-                            "minimum_exam_grade": 3.0,
-                            "automatic_failure_rules": [],
-                            "grade_cap_rules": [],
-                            "attendance_rules": [],
-                        },
-                    },
-                    "criterios_eximicion": {
-                        "found": True,
-                        "page_numbers": [8],
-                        "raw_evidence": "Promedio igual o superior a 5,5",
-                        "structured_data": {
-                            "is_available": True,
-                            "threshold": 5.5,
-                            "conditions": ["Promedio igual o superior a 5,5"],
-                        },
-                    },
-                    "nota_final": {
-                        "found": True,
-                        "page_numbers": [9],
-                        "raw_evidence": "NF = 0.7 NP + 0.3 EX",
-                        "structured_data": {
-                            "presentation_grade_formula": "NP = ...",
-                            "final_grade_formula": "NF = 0.7 NP + 0.3 EX",
-                            "presentation_weight": 70,
-                            "exam_weight": 30,
-                        },
-                    },
-                },
-                "warnings": [],
-            }
 
         return {
             "course": {
@@ -128,12 +65,76 @@ class FakeAIClient:
         }
 
 
-def test_ai_analyzer_uses_one_extraction_per_syllabus_and_one_global_comparison(monkeypatch):
-    class FakeSettings:
-        ai_max_pdf_text_chars = 5000
-        local_model = "qwen2.5:14b"
+def test_ai_analyzer_uses_code_extraction_and_one_global_ai_comparison(monkeypatch):
+    extracted_nrcs = []
 
-    monkeypatch.setattr("app.services.ai_analyzer.get_settings", lambda: FakeSettings())
+    def fake_extract(syllabus):
+        extracted_nrcs.append(syllabus.nrc)
+        threshold = 5.8 if syllabus.nrc == "7543" else 5.5
+        return {
+            "metadata": {
+                "course_code": "2207",
+                "course_name": "TERMODINAMICA",
+                "nrc": syllabus.nrc,
+                "semester": "202610",
+                "academic_period": "202610",
+                "source_file": syllabus.original_filename,
+            },
+            "sections": {
+                "evaluaciones_y_ponderaciones": {
+                    "found": True,
+                    "page_numbers": [6],
+                    "raw_evidence": "Pruebas 30, Examen 70",
+                    "structured_data": {
+                        "evaluations": [
+                            {
+                                "type": "Pruebas",
+                                "quantity": 3,
+                                "weight_total": 30,
+                                "weight_each": 10,
+                                "description": "3 pruebas",
+                            }
+                        ]
+                    },
+                },
+                "requisitos_aprobacion": {
+                    "found": True,
+                    "page_numbers": [8],
+                    "raw_evidence": "Nota mínima de aprobación 4.0",
+                    "structured_data": {
+                        "minimum_final_grade": 4.0,
+                        "minimum_exam_grade": 3.0,
+                        "automatic_failure_rules": [],
+                        "grade_cap_rules": [],
+                        "attendance_rules": [],
+                    },
+                },
+                "criterios_eximicion": {
+                    "found": True,
+                    "page_numbers": [8],
+                    "raw_evidence": f"Promedio igual o superior a {threshold}",
+                    "structured_data": {
+                        "is_available": True,
+                        "threshold": threshold,
+                        "conditions": [f"Promedio igual o superior a {threshold}"],
+                    },
+                },
+                "nota_final": {
+                    "found": True,
+                    "page_numbers": [9],
+                    "raw_evidence": "NF = 0.7 NP + 0.3 EX",
+                    "structured_data": {
+                        "presentation_grade_formula": "NP = ...",
+                        "final_grade_formula": "NF = 0.7 NP + 0.3 EX",
+                        "presentation_weight": 70,
+                        "exam_weight": 30,
+                    },
+                },
+            },
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("app.services.ai_analyzer.extract_normalized_syllabus_json_from_pdf", fake_extract)
 
     client = FakeAIClient()
     syllabi = [
@@ -177,7 +178,7 @@ NF = 0.7 NP + 0.3 EX
         ),
     ]
 
-    result = analyze_syllabi_with_ai(
+    result = analyze_syllabi(
         syllabi,
         {
             "academic_period": "202610",
@@ -185,13 +186,13 @@ NF = 0.7 NP + 0.3 EX
             "course_name": "TERMODINAMICA",
         },
         client=client,
-        max_text_chars=5000,
     )
 
     extraction_calls = [call for call in client.calls if call["schema_name"] == "syllabus_extraction"]
     comparison_calls = [call for call in client.calls if call["schema_name"] == "syllabus_comparison"]
 
-    assert len(extraction_calls) == 2
+    assert extracted_nrcs == ["7542", "7543"]
+    assert len(extraction_calls) == 0
     assert len(comparison_calls) == 1
     assert result["summary"]["course"]["course_code"] == "2207"
     assert result["summary"]["severity_counts"]["Crítica"] == 1

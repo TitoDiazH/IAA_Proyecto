@@ -2,30 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.config import get_settings
 from app.models import Syllabus
 from app.services.ai_client import JsonCompletionClient, get_json_client
 from app.services.syllabus_comparator import compare_normalized_syllabi
-from app.services.syllabus_extractor import extract_normalized_syllabus_json
+from app.services.syllabus_extractor import extract_normalized_syllabus_json_from_pdf
 
 
-def analyze_syllabi_with_ai(
+def analyze_syllabi(
     syllabi: list[Syllabus],
     course_metadata: dict[str, Any],
     client: JsonCompletionClient | None = None,
-    max_text_chars: int | None = None,
 ) -> dict[str, Any]:
-    settings = get_settings()
     ai_client = client or get_json_client()
-    text_limit = max_text_chars or settings.ai_max_pdf_text_chars
 
     extracted_by_nrc: dict[str, Any] = {}
     for syllabus in syllabi:
-        extracted_by_nrc[syllabus.nrc] = extract_normalized_syllabus_json(
-            syllabus,
-            ai_client,
-            text_limit,
-        )
+        extracted_by_nrc[syllabus.nrc] = extract_normalized_syllabus_json_from_pdf(syllabus)
 
     comparison = compare_normalized_syllabi(
         course_metadata=course_metadata,

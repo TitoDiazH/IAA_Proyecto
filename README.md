@@ -43,9 +43,7 @@ Variables útiles:
 - `STORAGE_DIR`: carpeta interna donde se guardan PDFs.
 - `ALLOWED_ORIGINS`: orígenes permitidos por CORS.
 - `MAX_UPLOAD_MB`: tamaño máximo del ZIP.
-- `AI_REQUEST_TIMEOUT_SECONDS`: timeout por llamada a IA.
-- `AI_MAX_PDF_TEXT_CHARS`: máximo de texto del PDF enviado por prompt.
-- `AI_SECTION_CONCURRENCY`: cantidad de secciones analizadas en paralelo por syllabus. Para Ollama local en CPU se recomienda `1`.
+- `AI_REQUEST_TIMEOUT_SECONDS`: timeout por llamada a IA. La IA solo compara JSON estructurados.
 - `OLLAMA_BASE_URL`: URL del servidor local de Ollama.
 - `LOCAL_LLM_MODEL`: modelo local a usar con Ollama.
 
@@ -69,11 +67,11 @@ Luego:
 4. Selecciona el curso `2207`.
 5. Presiona `Analizar`.
 
-El ejemplo contiene tres NRC de Termodinámica. Dos tienen reglas equivalentes con distinta redacción y un tercero cambia ponderaciones y umbral de eximición. El análisis extrae texto relevante por sección y luego compara los syllabus con JSON estructurado.
+El ejemplo contiene tres NRC de Termodinámica. Dos tienen reglas equivalentes con distinta redacción y un tercero cambia ponderaciones y umbral de eximición. El análisis extrae datos estructurados desde los PDFs y luego usa la IA solo para comparar los JSON por NRC.
 
 ## Flujo de análisis
 
-El backend guarda el PDF como respaldo, extrae su texto y recorta solo las secciones relevantes antes de llamar a la IA. En concreto, prioriza:
+El backend guarda el PDF como respaldo y extrae por código los datos relevantes de cada syllabus. En concreto, prioriza:
 
 - Información general de la asignatura.
 - Evaluaciones y ponderaciones.
@@ -81,7 +79,7 @@ El backend guarda el PDF como respaldo, extrae su texto y recorta solo las secci
 - Nota final de la asignatura.
 - Criterios de eximición y reglas especiales detectadas dentro de esas secciones.
 
-Cada sección se envía como texto plano y el resultado se conserva con evidencia textual para trazabilidad.
+Cada syllabus se transforma primero en un JSON estructurado con metadata, secciones, evidencia breve y advertencias. La IA recibe únicamente esos JSON por NRC y devuelve el reporte comparativo final.
 
 ## Formato esperado de archivos
 
@@ -160,8 +158,8 @@ Variables intentadas:
 
 El análisis se ejecuta en dos etapas:
 
-1. La IA recibe un prompt específico para cada apartado y cada syllabus.
-2. La IA compara la información estructurada entre NRC y genera el reporte.
+1. El backend extrae por código un JSON estructurado para cada syllabus/NRC.
+2. La IA compara esos JSON entre NRC y genera el reporte.
 
 Con dos syllabus, el sistema solo reporta diferencias entre ambos. Con tres o más, intenta detectar el patrón mayoritario y marcar el NRC que más se aleja del grupo.
 
@@ -174,5 +172,5 @@ Con dos syllabus, el sistema solo reporta diferencias entre ambos. Con tres o m�
 - No integra Canvas ni otros sistemas institucionales.
 - No incluye OCR; PDFs escaneados o imagen pueden quedar sin texto.
 - El análisis depende de la disponibilidad y rendimiento del servidor local de Ollama.
-- El texto enviado a IA se recorta según `AI_MAX_PDF_TEXT_CHARS` para controlar contexto y costo.
+- La comparación depende de la calidad del JSON extraído por código.
 - No hay autenticación ni roles de usuario.

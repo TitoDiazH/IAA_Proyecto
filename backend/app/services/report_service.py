@@ -5,7 +5,7 @@ import time
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import AnalysisReport, CourseGroup, Inconsistency, Syllabus
-from app.services.ai_analyzer import analyze_syllabi_with_ai
+from app.services.ai_analyzer import analyze_syllabi
 
 
 def analyze_course(db: Session, course_id: int) -> AnalysisReport:
@@ -52,7 +52,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
         "course_code": course.course_code,
         "course_name": course.course_name,
     }
-    comparison = analyze_syllabi_with_ai(syllabi, course_metadata)
+    comparison = analyze_syllabi(syllabi, course_metadata)
     elapsed = round(time.perf_counter() - started_at, 3)
     summary = comparison["summary"]
     summary["course"] = comparison.get("course", course_metadata)
