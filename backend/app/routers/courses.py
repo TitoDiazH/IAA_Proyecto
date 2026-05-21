@@ -114,3 +114,21 @@ def download_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> FileRe
         raise HTTPException(status_code=404, detail="El archivo PDF ya no existe en almacenamiento")
 
     return FileResponse(path, filename=syllabus.original_filename, media_type="application/pdf")
+
+
+@router.get("/syllabi/{syllabus_id}/view")
+def view_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).one_or_none()
+    if syllabus is None:
+        raise HTTPException(status_code=404, detail="Syllabus no encontrado")
+
+    path = Path(syllabus.stored_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="El archivo PDF ya no existe en almacenamiento")
+
+    return FileResponse(
+        path,
+        filename=syllabus.original_filename,
+        media_type="application/pdf",
+        content_disposition_type="inline",
+    )

@@ -41,3 +41,6 @@ export function syllabusDownloadUrl(syllabusId) {
   return `${API_BASE}/courses/syllabi/${syllabusId}/download`;
 }
 
+export function syllabusViewUrl(syllabusId) {
+  return `${API_BASE}/courses/syllabi/${syllabusId}/view`;
+}

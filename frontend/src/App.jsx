@@ -2,6 +2,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
   FileArchive,
   FileText,
   Loader2,
@@ -17,6 +20,7 @@ import {
   getLatestReport,
   listCourses,
   syllabusDownloadUrl,
+  syllabusViewUrl,
   uploadZip,
 } from "./api";
 
@@ -40,6 +44,12 @@ function courseColor(id) {
 function SeverityBadge({ severity }) {
   const cls = `severity severity-${severity?.toLowerCase() || "none"}`;
   return <span className={cls}>{severity || "Sin nivel"}</span>;
+}
+
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "PDF";
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -336,10 +346,144 @@ function ReportView({ report }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SYLLABUS DOCUMENT SELECTOR
+// ═══════════════════════════════════════════════════════════════════════════════
+function SyllabusDocumentSelector({ syllabi, activeIndex, onSelect }) {
+  if (!syllabi.length) {
+    return (
+      <section className="documents-overview">
+        <div className="empty-pdf-state">
+          <FileText size={30} aria-hidden="true" />
+          <p>Este curso no tiene PDFs asociados.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="documents-overview" aria-label="Documentos del curso">
+      <div className="viewer-header">
+        <div>
+          <h3>Documentos del curso</h3>
+          <p>
+            {syllabi.length} syllabus disponibles · {activeIndex + 1} de{" "}
+            {syllabi.length}
+          </p>
+        </div>
+      </div>
+
+      <div className="syllabus-track" role="tablist" aria-label="Syllabus disponibles">
+        {syllabi.map((s, index) => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            aria-selected={index === activeIndex}
+            className={`syllabus-tab ${index === activeIndex ? "is-active" : ""}`}
+            onClick={() => onSelect(index)}
+          >
+            <strong>NRC {s.nrc}</strong>
+            <span>{s.original_filename}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SYLLABUS PDF VIEWER
+// ═══════════════════════════════════════════════════════════════════════════════
+function SyllabusPdfViewer({ syllabi, activeIndex, onSelect }) {
+  const activeSyllabus = syllabi[activeIndex];
+
+  if (!activeSyllabus) {
+    return null;
+  }
+
+  function moveBy(delta) {
+    onSelect((current) => {
+      const next = current + delta;
+      if (next < 0) return syllabi.length - 1;
+      if (next >= syllabi.length) return 0;
+      return next;
+    });
+  }
+
+  return (
+    <section className="syllabus-viewer" aria-label="Visor de syllabus del curso">
+      <div className="pdf-carousel-shell">
+        <button
+          type="button"
+          className="icon-button viewer-side-button"
+          onClick={() => moveBy(-1)}
+          aria-label="Ver syllabus anterior"
+          title="Anterior"
+        >
+          <ChevronLeft size={20} />
+        </button>
+
+        <div className="pdf-panel">
+          <div className="pdf-panel-meta">
+            <div className="pdf-title">
+              <FileText size={18} aria-hidden="true" />
+              <span>
+                <strong>NRC {activeSyllabus.nrc}</strong>
+                <small>{activeSyllabus.original_filename}</small>
+              </span>
+            </div>
+            <div className="pdf-links">
+              <span>{formatFileSize(activeSyllabus.file_size)}</span>
+              <a
+                className="pdf-open-link"
+                href={syllabusDownloadUrl(activeSyllabus.id)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <ExternalLink size={15} aria-hidden="true" />
+                Abrir
+              </a>
+            </div>
+          </div>
+          <iframe
+            key={activeSyllabus.id}
+            className="pdf-frame"
+            src={`${syllabusViewUrl(activeSyllabus.id)}#view=FitH&toolbar=0&navpanes=0`}
+            title={`Syllabus NRC ${activeSyllabus.nrc}`}
+          />
+        </div>
+
+        <button
+          type="button"
+          className="icon-button viewer-side-button"
+          onClick={() => moveBy(1)}
+          aria-label="Ver syllabus siguiente"
+          title="Siguiente"
+        >
+          <ChevronRight size={20} />
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // DETAIL VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-function DetailView({ course, report, analyzing, loading, onBack, onAnalyze, onLoadReport }) {
+function DetailView({ course, report, analyzing, loading, onBack, onAnalyze }) {
   const color = course ? courseColor(course.id) : PALETTE[0];
+  const syllabi = course?.syllabi ?? [];
+  const [activeSyllabusIndex, setActiveSyllabusIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveSyllabusIndex(0);
+  }, [course?.id]);
+
+  useEffect(() => {
+    if (syllabi.length > 0 && activeSyllabusIndex >= syllabi.length) {
+      setActiveSyllabusIndex(syllabi.length - 1);
+    }
+  }, [activeSyllabusIndex, syllabi.length]);
 
   return (
     <div className="detail-view">
@@ -389,63 +533,46 @@ function DetailView({ course, report, analyzing, loading, onBack, onAnalyze, onL
                 )}
                 {analyzing ? "Analizando…" : "Analizar"}
               </button>
-              {course.latest_report_id && !analyzing && (
-                <button className="ghost-button" onClick={onLoadReport}>
-                  <RefreshCcw size={16} />
-                  Ver último reporte
-                </button>
-              )}
             </div>
           </div>
 
-          {/* Body: syllabi (left) + report (right) */}
+          {/* Body: report + syllabus viewer */}
           <div className="detail-body">
-            <aside className="detail-sidebar">
-              <h3>
-                Syllabus asociados
-                <span className="sidebar-count">{course.syllabi.length}</span>
-              </h3>
-              <div className="syllabus-list">
-                {course.syllabi.map((s) => (
-                  <a
-                    key={s.id}
-                    className="syllabus-item"
-                    href={syllabusDownloadUrl(s.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <FileText size={17} aria-hidden="true" />
-                    <span>
-                      <strong>NRC {s.nrc}</strong>
-                      <small>{s.original_filename}</small>
-                    </span>
-                    <em>{s.extraction_status}</em>
-                  </a>
-                ))}
-              </div>
-            </aside>
-
             <main className="detail-main">
-              {analyzing ? (
-                <div className="analyzing-state">
-                  <Loader2 className="spin" size={26} />
-                  <p>
-                    Analizando syllabus con IA local…
-                    <br />
-                    <small>Esto puede tardar unos minutos.</small>
-                  </p>
-                </div>
-              ) : report ? (
-                <ReportView report={report} />
-              ) : (
-                <div className="no-report-state">
-                  <PlayCircle size={32} aria-hidden="true" />
-                  <p>
-                    Presiona <strong>Analizar</strong> para comparar los syllabus de este
-                    curso.
-                  </p>
-                </div>
-              )}
+              <SyllabusDocumentSelector
+                syllabi={syllabi}
+                activeIndex={activeSyllabusIndex}
+                onSelect={setActiveSyllabusIndex}
+              />
+
+              <div className="detail-analysis">
+                {analyzing ? (
+                  <div className="analyzing-state">
+                    <Loader2 className="spin" size={26} />
+                    <p>
+                      Analizando syllabus con IA local…
+                      <br />
+                      <small>Esto puede tardar unos minutos.</small>
+                    </p>
+                  </div>
+                ) : report ? (
+                  <ReportView report={report} />
+                ) : (
+                  <div className="no-report-state">
+                    <PlayCircle size={32} aria-hidden="true" />
+                    <p>
+                      Presiona <strong>Analizar</strong> para comparar los syllabus de este
+                      curso.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <SyllabusPdfViewer
+                syllabi={syllabi}
+                activeIndex={activeSyllabusIndex}
+                onSelect={setActiveSyllabusIndex}
+              />
             </main>
           </div>
         </>
@@ -488,6 +615,14 @@ export default function App() {
     try {
       const course = await getCourse(courseId);
       setActiveCourse(course);
+      if (course.latest_report_id) {
+        try {
+          const latestReport = await getLatestReport(courseId);
+          setReport(latestReport);
+        } catch (exc) {
+          setError(exc.message);
+        }
+      }
     } catch (exc) {
       setError(exc.message);
       setView("home");
@@ -519,17 +654,6 @@ export default function App() {
     }
   }
 
-  async function loadLatestReport() {
-    if (!activeCourse) return;
-    setError(null);
-    try {
-      const result = await getLatestReport(activeCourse.id);
-      setReport(result);
-    } catch (exc) {
-      setError(exc.message);
-    }
-  }
-
   useEffect(() => {
     refreshCourses();
   }, []);
@@ -557,7 +681,6 @@ export default function App() {
           loading={loadingDetail}
           onBack={goHome}
           onAnalyze={handleAnalyze}
-          onLoadReport={loadLatestReport}
         />
       )}
     </div>
