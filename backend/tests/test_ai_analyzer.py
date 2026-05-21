@@ -248,6 +248,58 @@ def test_compare_normalized_syllabi_fills_missing_summary_fields():
     assert result["inconsistencies"][0]["severity"] == "critica"
 
 
+def test_compare_normalized_syllabi_keeps_textual_evidence_quotes():
+    class EvidenceClient:
+        def complete_json(self, *, system_prompt, user_prompt, schema_name, schema):
+            return {
+                "course": {
+                    "course_code": "2207",
+                    "course_name": "TERMODINAMICA",
+                    "nrcs_compared": ["7542", "7543"],
+                },
+                "summary": {
+                    "total_syllabus_compared": 2,
+                    "total_inconsistencies": 1,
+                    "most_deviating_nrc": "7543",
+                    "severity_counts": {"critica": 1, "moderada": 0, "menor": 0},
+                    "possible_outlier": {"nrc": "7543", "alerts": 1, "reason": "Mayor diferencia"},
+                    "analysis_mode": "group_pattern",
+                },
+                "inconsistencies": [
+                    {
+                        "section": "nota_final",
+                        "variable": "final_grade_formula",
+                        "severity": "critica",
+                        "description": "La formula de nota final difiere entre NRC.",
+                        "values_by_nrc": {"7542": "NF = 0.7 NP + 0.3 EX", "7543": "NF = 0.6 NP + 0.4 EX"},
+                        "majority_value": "NF = 0.7 NP + 0.3 EX",
+                        "outlier_nrcs": ["7543"],
+                        "evidence": [
+                            {"nrc": "7542", "page": None, "quote": "NF = 0.7 NP + 0.3 EX"},
+                            {"nrc": "7543", "page": None, "text": "NF = 0.6 NP + 0.4 EX"},
+                            {"nrc": "7543", "page": None, "text": ""},
+                        ],
+                        "suggested_action": "Unificar la formula oficial de nota final.",
+                    }
+                ],
+                "warnings": [],
+            }
+
+    result = compare_normalized_syllabi(
+        course_metadata={"course_code": "2207", "course_name": "TERMODINAMICA"},
+        normalized_syllabi_by_nrc={
+            "7542": {"nrc": "7542", "evaluaciones": [], "requisitos_aprobacion": "", "nota_final": ""},
+            "7543": {"nrc": "7543", "evaluaciones": [], "requisitos_aprobacion": "", "nota_final": ""},
+        },
+        ai_client=EvidenceClient(),
+    )
+
+    assert result["inconsistencies"][0]["evidence"] == [
+        {"nrc": "7542", "page": None, "text": "NF = 0.7 NP + 0.3 EX"},
+        {"nrc": "7543", "page": None, "text": "NF = 0.6 NP + 0.4 EX"},
+    ]
+
+
 def test_compare_normalized_syllabi_discards_equivalent_rules_and_values():
     class EquivalentClient:
         def complete_json(self, *, system_prompt, user_prompt, schema_name, schema):

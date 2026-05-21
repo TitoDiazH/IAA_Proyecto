@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronDown,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -9,6 +10,7 @@ import {
   FileText,
   Loader2,
   PlayCircle,
+  Quote,
   RefreshCcw,
   Upload,
   X,
@@ -50,6 +52,24 @@ function formatFileSize(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "PDF";
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function normalizeEvidence(evidence) {
+  if (!evidence) return [];
+
+  const items = Array.isArray(evidence)
+    ? evidence
+    : Array.isArray(evidence.items)
+      ? evidence.items
+      : [];
+
+  return items
+    .map((item) => ({
+      nrc: String(item?.nrc || "").trim(),
+      page: item?.page ?? null,
+      text: String(item?.text || item?.quote || item?.citation || "").trim(),
+    }))
+    .filter((item) => item.nrc && item.text);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -322,19 +342,7 @@ function ReportView({ report }) {
               <h4 className="report-section-name">{section}</h4>
               <div className="inconsistency-list">
                 {items.map((item) => (
-                  <div key={item.id} className="inconsistency-card">
-                    <div className="inconsistency-header">
-                      <SeverityBadge severity={item.severity} />
-                      <span className="inconsistency-variable">{item.variable}</span>
-                      <span className="inconsistency-nrcs">
-                        NRC: {item.involved_nrcs.join(", ")}
-                      </span>
-                    </div>
-                    <p className="inconsistency-diff">{item.difference}</p>
-                    {item.suggestion && (
-                      <p className="inconsistency-suggestion">{item.suggestion}</p>
-                    )}
-                  </div>
+                  <InconsistencyCard key={item.id} item={item} />
                 ))}
               </div>
             </div>
@@ -342,6 +350,56 @@ function ReportView({ report }) {
         </div>
       )}
     </section>
+  );
+}
+
+function InconsistencyCard({ item }) {
+  const evidence = normalizeEvidence(item.evidence);
+  const [showEvidence, setShowEvidence] = useState(false);
+
+  return (
+    <div className="inconsistency-card">
+      <div className="inconsistency-header">
+        <SeverityBadge severity={item.severity} />
+        <span className="inconsistency-variable">{item.variable}</span>
+        <span className="inconsistency-nrcs">
+          NRC: {item.involved_nrcs.join(", ")}
+        </span>
+      </div>
+      <p className="inconsistency-diff">{item.difference}</p>
+      {item.suggestion && (
+        <p className="inconsistency-suggestion">{item.suggestion}</p>
+      )}
+      {evidence.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="evidence-toggle"
+            onClick={() => setShowEvidence((current) => !current)}
+            aria-expanded={showEvidence}
+          >
+            <Quote size={15} aria-hidden="true" />
+            {showEvidence ? "Ocultar citas" : `Ver citas (${evidence.length})`}
+            <ChevronDown
+              size={15}
+              className={`evidence-toggle-icon ${showEvidence ? "is-open" : ""}`}
+              aria-hidden="true"
+            />
+          </button>
+          {showEvidence && (
+            <div className="evidence-list" aria-label="Citas textuales usadas en el análisis">
+              {evidence.map((quote, index) => (
+                <blockquote key={`${quote.nrc}-${index}`} className="evidence-item">
+                  <span className="evidence-nrc">NRC {quote.nrc}</span>
+                  <p>{quote.text}</p>
+                  {quote.page && <small>Página {quote.page}</small>}
+                </blockquote>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

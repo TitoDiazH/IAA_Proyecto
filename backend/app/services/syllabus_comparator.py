@@ -95,13 +95,10 @@ def _normalize_evidence_items(items: Any) -> list[dict[str, Any]]:
             page_number = int(page) if page is not None else None
         except (TypeError, ValueError):
             page_number = None
-        normalized_items.append(
-            {
-                "nrc": nrc,
-                "page": page_number,
-                "text": _normalize_scalar(item.get("text")),
-            }
-        )
+        text = _normalize_scalar(item.get("text") or item.get("quote") or item.get("citation"))
+        if text is None:
+            continue
+        normalized_items.append({"nrc": nrc, "page": page_number, "text": text})
     return normalized_items
 
 

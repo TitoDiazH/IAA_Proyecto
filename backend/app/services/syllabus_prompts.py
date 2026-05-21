@@ -54,6 +54,11 @@ Mayoría y outliers:
 Salida:
 - Devuelve exclusivamente JSON válido.
 - Todo el texto generado debe estar en español neutro.
+- En cada inconsistencia, evidence debe contener las citas textuales breves que justifican
+  el análisis. Cada cita debe indicar el NRC, page = null y text con el fragmento exacto
+  tomado de evaluaciones, requisitos_aprobacion o nota_final.
+- Incluye citas para los NRC relevantes del contraste, especialmente el valor mayoritario
+  y el o los NRC que se apartan.
 - Si un dato no puede determinarse con seguridad, usa null y agrega una advertencia en warnings.
 """.strip()
 
@@ -183,8 +188,10 @@ Instrucciones para la comparación:
 - Si varias diferencias pertenecen al mismo problema académico, agrúpalas en una sola inconsistencia.
 - Si falta un dato en uno o más NRC, repórtalo solo si la omisión afecta evaluación,
   aprobación, fórmula de nota final o interpretación académica relevante.
-- En evidence usa page = null. En text puedes citar brevemente el valor relevante tomado
-  desde evaluaciones, requisitos_aprobacion o nota_final. Si no hay texto breve útil, usa text = null.
+- En evidence devuelve una lista de citas textuales breves que expliquen por qué detectaste
+  la inconsistencia. Cada item debe incluir nrc, page = null y text con el fragmento exacto
+  tomado de evaluaciones, requisitos_aprobacion o nota_final. Incluye al menos una cita por
+  cada NRC involucrado cuando exista texto disponible.
 - Todo el contenido textual producido debe estar en español neutro.
 - Devuelve exclusivamente JSON válido siguiendo el schema definido.
 """.strip()
