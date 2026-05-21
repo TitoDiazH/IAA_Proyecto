@@ -13,8 +13,8 @@
     "vite": "6.0.7",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "lucide-react": "0.468.0"
+    "lucide-react": "0.468.0",
+    "pdfjs-dist": "^5.7.284"
   },
   "devDependencies": {}
 }
-

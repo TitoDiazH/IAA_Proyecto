@@ -797,12 +797,134 @@ button:disabled {
   text-decoration: underline;
 }
 
-.pdf-frame {
-  display: block;
-  width: 100%;
-  height: clamp(520px, 68vh, 720px);
-  border: 0;
+.pdf-highlight-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 0 0 10px;
+  color: #657269;
+  font-size: 0.78rem;
+}
+
+.pdf-highlight-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.legend-dot-critica {
+  background: rgba(198, 40, 40, 0.85);
+}
+
+.legend-dot-moderada {
+  background: rgba(245, 158, 11, 0.88);
+}
+
+.legend-dot-menor {
+  background: rgba(37, 99, 235, 0.78);
+}
+
+.pdf-render-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 260px;
+  border: 1px solid #d8e2dc;
+  border-radius: 8px;
+  background: #f8faf8;
+  color: #657269;
+}
+
+.pdf-render-state p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.pdf-document {
+  max-height: clamp(640px, 78vh, 920px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #d8e2dc;
+  border-radius: 8px;
+  background: #edf2ef;
+}
+
+.pdf-page {
+  position: relative;
+  margin: 0 auto 14px;
   background: #fff;
+  box-shadow: 0 4px 14px rgba(15, 28, 20, 0.14);
+}
+
+.pdf-page:last-child {
+  margin-bottom: 0;
+}
+
+.pdf-page-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  color: #657269;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.pdf-canvas {
+  display: block;
+}
+
+.pdf-highlight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pdf-highlight {
+  position: absolute;
+  z-index: 2;
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+  outline: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.pdf-highlight.is-focused {
+  z-index: 4;
+  outline: 2px solid rgba(23, 107, 77, 0.9);
+  animation: quote-focus 1400ms ease-out 1;
+}
+
+.pdf-page-anchor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+@keyframes quote-focus {
+  0% {
+    box-shadow: 0 0 0 0 rgba(23, 107, 77, 0.58);
+  }
+  65% {
+    box-shadow: 0 0 0 8px rgba(23, 107, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(23, 107, 77, 0);
+  }
 }
 
 .empty-pdf-state {
@@ -1015,6 +1137,20 @@ button:disabled {
   border-left: 3px solid #9fb8aa;
   border-radius: 7px;
   background: #fbfdfb;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.evidence-item:hover {
+  border-color: #b6cabf;
+  border-left-color: #176b4d;
+  background: #f5fbf7;
+}
+
+.evidence-item:focus-visible {
+  outline: none;
+  border-color: #176b4d;
+  box-shadow: 0 0 0 3px rgba(23, 107, 77, 0.16);
 }
 
 .evidence-nrc {
@@ -1117,8 +1253,8 @@ th {
     height: 38px;
   }
 
-  .pdf-frame {
-    height: clamp(420px, 62vh, 620px);
+  .pdf-document {
+    max-height: clamp(500px, 70vh, 760px);
   }
 
   .course-grid {
