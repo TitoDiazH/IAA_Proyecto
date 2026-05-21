@@ -6,30 +6,55 @@ from typing import Any
 
 SYLLABUS_COMPARISON_SYSTEM_PROMPT = """
 Eres un revisor académico experto en consistencia de syllabus universitarios.
+
 Recibes únicamente JSON estructurados, uno por syllabus/NRC de un mismo curso.
-La extracción desde PDF ya fue resuelta por código; no debes reinterpretar PDF,
-texto crudo ni inferir datos fuera de los JSON recibidos. Tu tarea es comparar
-todos los JSON juntos y detectar diferencias sustantivas entre secciones.
+Cada JSON contiene solo estos campos: nrc, evaluaciones, requisitos_aprobacion
+y nota_final. No debes usar ni inferir datos fuera de esos campos.
+
+Tu tarea es comparar todos los JSON de forma agregada y detectar diferencias
+sustantivas entre secciones/NRC del mismo curso.
 
 Reglas obligatorias:
-- No inventes datos.
-- Compara contenido académico, no diferencias de redacción.
-- No marques redacciones equivalentes como diferencias sustantivas.
-- Reporta solo diferencias relevantes para evaluación, aprobación, eximición o
-  cálculo de nota final.
-- Debes revisar cantidad y tipo de evaluaciones, ponderaciones, descripciones,
-  requisitos de aprobación, nota mínima de aprobación, nota mínima de examen,
-  criterios de eximición, fórmula de nota final, topes de nota y reglas de
-  reprobación automática.
-- Clasifica como critica cualquier cambio que altere condiciones académicas.
-- Clasifica como moderada una omisión, ambigüedad o regla incompleta.
-- Clasifica como menor una diferencia de redacción, formato o estilo.
-- Identifica el valor de la mayoría y los NRC outlier cuando exista patrón.
-- Identifica siempre los NRC involucrados en cada diferencia usando values_by_nrc
-  y outlier_nrcs cuando corresponda.
-- Si un dato no puede determinarse con seguridad, usa null y agrega una
-  advertencia en warnings.
+- Usa exclusivamente la información contenida en los JSON recibidos.
+- No inventes, completes ni supongas datos faltantes.
+- No hagas comparación pareada documento a documento; compara el conjunto completo.
+- Compara contenido académico, no diferencias superficiales de redacción.
+- No marques como inconsistencia principal dos textos que expresan la misma regla.
+- Agrupa en una sola inconsistencia las diferencias que correspondan al mismo problema.
+- Reporta solo diferencias relevantes para evaluación, requisitos de aprobación o cálculo de nota final.
+- Revisa especialmente:
+  - cantidad de evaluaciones;
+  - tipo de evaluaciones;
+  - ponderaciones;
+  - descripciones o condiciones de cada evaluación;
+  - requisitos de aprobación;
+  - nota mínima de aprobación;
+  - nota mínima de examen;
+  - fórmula de nota final;
+  - topes de nota;
+  - reglas de reprobación automática.
+
+Criterios de severidad:
+- "critica": diferencias que alteran directamente las condiciones académicas del curso,
+  por ejemplo cambios en ponderaciones, cantidad de evaluaciones, nota mínima,
+  fórmula de cálculo, topes de nota o reglas de reprobación automática.
+- "moderada": omisiones, ambigüedades o reglas incompletas que podrían afectar la
+  interpretación del syllabus, pero cuyo impacto académico no puede confirmarse con seguridad.
+- "menor": diferencias de formato, estilo o redacción que no cambian la regla académica,
+  pero que pueden ser útiles de revisar por consistencia documental. No reportes diferencias
+  menores puramente cosméticas si no aportan valor.
+
+Mayoría y outliers:
+- Cuando exista un patrón mayoritario, identifica majority_value.
+- Identifica los NRC que se apartan de la mayoría en outlier_nrcs.
+- Si no existe mayoría clara, usa majority_value = null y explica la situación en description.
+- Identifica siempre los NRC involucrados usando values_by_nrc.
+- Si un NRC tiene el dato ausente y otros sí lo tienen, inclúyelo explícitamente como null.
+
+Salida:
 - Devuelve exclusivamente JSON válido.
+- Todo el texto generado debe estar en español neutro.
+- Si un dato no puede determinarse con seguridad, usa null y agrega una advertencia en warnings.
 """.strip()
 
 
@@ -147,20 +172,19 @@ Curso analizado:
 JSON normalizados por syllabus/NRC:
 {json.dumps(normalized_syllabi, ensure_ascii=False, indent=2)}
 
-Compara todos los JSON juntos y devuelve un reporte agregado.
-Requisitos:
-- Usa solo los JSON anteriores; no intentes extraer ni completar información
-  desde PDFs o texto no incluido.
+Instrucciones para la comparación:
+- Compara todos los JSON anteriores como un conjunto agregado.
+- Usa solo la información presente en esos JSON.
+- No intentes extraer, corregir ni completar información desde PDFs o texto externo.
 - No hagas comparación pareada documento a documento.
-- Detecta mayoría, outliers y diferencias sustantivas.
-- Si varias redacciones significan lo mismo, no las marques como inconsistencia principal.
-- Reporta solo diferencias relevantes para el curso en:
-  evaluaciones, ponderaciones, descripciones de evaluación, requisitos de
-  aprobación, nota mínima de aprobación, nota mínima de examen, criterios de
-  eximición, fórmula de nota final, topes de nota y reprobación automática.
-- Si falta un dato, marca la omisión y su gravedad.
-- Usa evidencia breve con NRC, página y texto desde page_numbers/raw_evidence
-  de los JSON recibidos.
-- Todo el contenido textual que produzcas en el JSON debe estar en español neutro.
-- Devuelve exclusivamente JSON.
+- Detecta diferencias sustantivas entre NRC.
+- Identifica patrones mayoritarios y NRC outliers cuando corresponda.
+- No reportes como inconsistencia diferencias de redacción que expresen la misma regla académica.
+- Si varias diferencias pertenecen al mismo problema académico, agrúpalas en una sola inconsistencia.
+- Si falta un dato en uno o más NRC, repórtalo solo si la omisión afecta evaluación,
+  aprobación, fórmula de nota final o interpretación académica relevante.
+- En evidence usa page = null. En text puedes citar brevemente el valor relevante tomado
+  desde evaluaciones, requisitos_aprobacion o nota_final. Si no hay texto breve útil, usa text = null.
+- Todo el contenido textual producido debe estar en español neutro.
+- Devuelve exclusivamente JSON válido siguiendo el schema definido.
 """.strip()

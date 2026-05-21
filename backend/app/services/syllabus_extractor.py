@@ -12,6 +12,15 @@ SECTION_REQUISITOS = "Requisitos de Aprobación"
 SECTION_EXIMICION = "Criterios de Eximición"
 SECTION_NOTA_FINAL = "Nota Final de la Asignatura"
 SECTION_BIBLIOGRAFIA = "Recursos de Aprendizaje - Bibliografía Básica"
+SECTION_CRONOGRAMA = "Cronograma de Actividades"
+
+NEXT_SECTIONS_AFTER_EVALUACIONES = [
+    SECTION_CRONOGRAMA,
+    SECTION_REQUISITOS,
+    SECTION_EXIMICION,
+    SECTION_NOTA_FINAL,
+    SECTION_BIBLIOGRAFIA,
+]
 
 
 def _abrir_pdf(pdf_path: str):
@@ -19,12 +28,66 @@ def _abrir_pdf(pdf_path: str):
         raise RuntimeError("pdfplumber no está instalado; no se puede ejecutar la extracción estructurada.")
     return pdfplumber.open(pdf_path)
 
-def es_ponderacion(valor: str) -> bool:
-    if valor is None:
-        return False
 
-    valor = str(valor).strip()
-    return bool(re.fullmatch(r"\d+(?:[.,]\d+)?\s*%?", valor))
+def extraer_texto_pdf(pdf_path: str, *, layout: bool = False) -> str:
+    textos = []
+
+    with _abrir_pdf(pdf_path) as pdf:
+        for page in pdf.pages:
+            textos.append(page.extract_text(layout=layout) or "")
+
+    return "\n".join(textos)
+
+
+def _rango_seccion_en_texto(
+    texto_completo: str,
+    titulo_seccion: str,
+    siguientes_secciones: str | list[str] | None = None,
+) -> tuple[int, int] | None:
+    start_title = texto_completo.find(titulo_seccion)
+    if start_title == -1:
+        return None
+
+    start = start_title + len(titulo_seccion)
+    siguientes = []
+    if isinstance(siguientes_secciones, str):
+        siguientes = [siguientes_secciones]
+    elif siguientes_secciones:
+        siguientes = siguientes_secciones
+
+    end_candidates = [
+        index
+        for siguiente in siguientes
+        if (index := texto_completo.find(siguiente, start)) != -1
+    ]
+    end = min(end_candidates) if end_candidates else len(texto_completo)
+    return start, end
+
+
+def _paginas_en_rango_seccion(
+    textos_paginas: list[tuple[int, str]],
+    titulo_seccion: str,
+    siguientes_secciones: str | list[str] | None = None,
+) -> list[int]:
+    texto_completo = "\n".join(texto for _, texto in textos_paginas)
+    rango = _rango_seccion_en_texto(texto_completo, titulo_seccion, siguientes_secciones)
+    if rango is None:
+        return []
+
+    section_start, section_end = rango
+    page_spans: list[tuple[int, int, int]] = []
+    cursor = 0
+    for page_num, page_text in textos_paginas:
+        page_start = cursor
+        page_end = page_start + len(page_text)
+        page_spans.append((page_num, page_start, page_end))
+        cursor = page_end + 1
+
+    return [
+        page_num
+        for page_num, page_start, page_end in page_spans
+        if page_end >= section_start and page_start < section_end
+    ]
 
 
 def parsear_ponderacion(valor: str) -> float | None:
@@ -49,126 +112,161 @@ def limpiar_texto(valor: Any) -> str | None:
     return texto if texto else None
 
 
-def fila_es_encabezado(row: list[Any]) -> bool:
-    texto = " ".join(str(c or "") for c in row).lower()
-
-    return (
-        "tipo" in texto
-        and "ponder" in texto
-        and "descrip" in texto
+def _texto_tabla_evaluaciones(texto: str) -> str:
+    header_match = re.search(
+        r"Tipo\s+de\s+Evaluaci[oó]n\s+Ponderaci[oó]n\s*\(%\)\s+Descripci[oó]n",
+        texto,
+        re.IGNORECASE,
     )
+    if not header_match:
+        return texto
+
+    texto_tabla = texto[header_match.end():]
+    cronograma_index = texto_tabla.find(SECTION_CRONOGRAMA)
+    if cronograma_index != -1:
+        texto_tabla = texto_tabla[:cronograma_index]
+    return texto_tabla.strip()
 
 
-def extraer_cantidad_evaluaciones(tipo: str | None, descripcion: str | None) -> int | None:
-    texto = " ".join(filter(None, [tipo, descripcion]))
-    match = re.search(r"\b(\d+)\s*(?:evaluaciones?|pruebas?|controles?|tareas?|trabajos?)\b", texto, re.IGNORECASE)
-    if not match:
-        return None
-    return int(match.group(1))
+def _lineas_evaluaciones(texto: str) -> list[str]:
+    return [
+        linea_limpia
+        for linea in texto.splitlines()
+        if (linea_limpia := limpiar_texto(linea))
+        and not re.fullmatch(r"Page\s+\d+\s+of\s+\d+", linea_limpia, re.IGNORECASE)
+    ]
 
 
-def normalizar_tabla_evaluaciones(table: list[list[Any]]) -> list[dict[str, Any]]:
-    evaluaciones = []
+def _termina_frase(texto: str) -> bool:
+    return texto.rstrip().endswith((".", ";", ":"))
 
-    for row in table:
-        if not row:
-            continue
 
-        row = [limpiar_texto(cell) for cell in row]
+def _parsear_evaluaciones_desde_texto(texto: str) -> list[dict[str, Any]]:
+    texto_tabla = _texto_tabla_evaluaciones(texto)
+    if not texto_tabla:
+        return []
 
-        if fila_es_encabezado(row):
-            continue
+    tipos = [
+        "Pruebas",
+        "Controles",
+        "Talleres",
+        "Laboratorios",
+        "Otros",
+        "Examen",
+        "Tareas",
+        "Trabajos",
+        "Proyecto",
+        "Presentaciones",
+    ]
+    tipo_pattern = "|".join(re.escape(tipo) for tipo in tipos)
+    row_pattern = re.compile(
+        rf"^\s*(?P<tipo>{tipo_pattern})\b\s+(?P<ponderacion>\d+(?:[.,]\d+)?\s*%?)\b(?P<resto>.*)$",
+        re.IGNORECASE,
+    )
+    lineas = _lineas_evaluaciones(texto_tabla)
+    rows = [
+        (index, match)
+        for index, linea in enumerate(lineas)
+        if (match := row_pattern.match(linea))
+    ]
+    if not rows:
+        return []
 
-        # Nos aseguramos de tener al menos 3 columnas
-        if len(row) < 3:
-            continue
+    descripciones: list[list[str]] = [[] for _ in rows]
+    evaluaciones = [
+        {
+            "tipo": match.group("tipo"),
+            "ponderacion": parsear_ponderacion(match.group("ponderacion")),
+            "descripcion": None,
+        }
+        for _, match in rows
+    ]
 
-        tipo = row[0]
-        ponderacion = row[1]
-        descripcion = row[2]
+    for row_pos, (line_index, match) in enumerate(rows):
+        if row_pos == 0:
+            descripciones[row_pos].extend(lineas[:line_index])
+        else:
+            previous_line_index = rows[row_pos - 1][0]
+            intermedias = lineas[previous_line_index + 1:line_index]
+            if len(intermedias) >= 2 and _termina_frase(intermedias[0]):
+                descripciones[row_pos - 1].append(intermedias[0])
+                descripciones[row_pos].extend(intermedias[1:])
+            else:
+                descripciones[row_pos - 1].extend(intermedias)
 
-        if not tipo or not es_ponderacion(ponderacion):
-            continue
+        resto = limpiar_texto(match.group("resto"))
+        if resto:
+            descripciones[row_pos].append(resto)
 
-        weight_total = parsear_ponderacion(ponderacion)
-        quantity = extraer_cantidad_evaluaciones(tipo, descripcion)
+    last_row_index = rows[-1][0]
+    descripciones[-1].extend(lineas[last_row_index + 1:])
 
-        evaluaciones.append(
-            {
-                "type": tipo,
-                "quantity": quantity,
-                "weight_total": weight_total,
-                "weight_each": round(weight_total / quantity, 2) if weight_total is not None and quantity else None,
-                "description": descripcion,
-            }
-        )
+    for index, partes in enumerate(descripciones):
+        evaluaciones[index]["descripcion"] = limpiar_texto(" ".join(partes))
 
     return evaluaciones
 
 
 def extraer_evaluaciones_y_ponderaciones_con_pagina_pdf(pdf_path: str) -> tuple[list[dict[str, Any]], list[int], str | None]:
     with _abrir_pdf(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
-            texto_pagina = page.extract_text() or ""
+        textos_paginas = [
+            (page_num, page.extract_text() or "")
+            for page_num, page in enumerate(pdf.pages, start=1)
+        ]
+        paginas_seccion = _paginas_en_rango_seccion(
+            textos_paginas,
+            SECTION_EVALUACIONES,
+            NEXT_SECTIONS_AFTER_EVALUACIONES,
+        )
+        if not paginas_seccion:
+            return [], [], None
 
-            if SECTION_EVALUACIONES not in texto_pagina:
-                continue
-
-            tables = page.extract_tables()
-
-            for table in tables:
-                if not table:
-                    continue
-
-                table_text = " ".join(
-                    str(cell or "")
-                    for row in table
-                    for cell in row
-                ).lower()
-
-                if (
-                    "tipo" in table_text
-                    and "ponder" in table_text
-                    and "descrip" in table_text
-                ):
-                    evaluaciones = normalizar_tabla_evaluaciones(table)
-
-                    if evaluaciones:
-                        return evaluaciones, [page_num], " | ".join(
-                            f"{item['type']}: {item['weight_total']}% ({item['description'] or 'sin descripción'})"
-                            for item in evaluaciones
-                        )
+    texto = extraer_texto_seccion_pdf(
+        pdf_path,
+        SECTION_EVALUACIONES,
+        NEXT_SECTIONS_AFTER_EVALUACIONES,
+        layout=True,
+    )
+    evaluaciones = _parsear_evaluaciones_desde_texto(texto)
+    if evaluaciones:
+        return evaluaciones, paginas_seccion, " | ".join(
+            f"{item['tipo']}: {item['ponderacion']}% ({item['descripcion'] or 'sin descripción'})"
+            for item in evaluaciones
+        )
 
     return [], [], None
+
+
+def extraer_evaluaciones_y_ponderaciones_pdf(pdf_path: str) -> list[dict[str, Any]]:
+    evaluaciones, _, _ = extraer_evaluaciones_y_ponderaciones_con_pagina_pdf(pdf_path)
+    return evaluaciones
 
 
 def extraer_texto_seccion_pdf(
     pdf_path: str,
     titulo_seccion: str,
-    siguiente_seccion: str | None = None
+    siguiente_seccion: str | list[str] | None = None,
+    *,
+    layout: bool = False,
 ) -> str:
     textos_paginas = []
 
     with _abrir_pdf(pdf_path) as pdf:
         for page in pdf.pages:
-            texto = page.extract_text() or ""
+            texto = page.extract_text(layout=layout) or ""
             textos_paginas.append(texto)
 
     texto_completo = "\n".join(textos_paginas)
-
-    if titulo_seccion not in texto_completo:
+    rango = _rango_seccion_en_texto(texto_completo, titulo_seccion, siguiente_seccion)
+    if rango is None:
         return ""
 
-    start = texto_completo.index(titulo_seccion) + len(titulo_seccion)
-
-    if siguiente_seccion and siguiente_seccion in texto_completo[start:]:
-        end = texto_completo.index(siguiente_seccion, start)
-    else:
-        end = len(texto_completo)
-
+    start, end = rango
     texto = texto_completo[start:end].strip()
 
-    # Pasar a texto continuo
+    if layout:
+        return texto.strip()
+
     texto = re.sub(r"\s*\n+\s*", " ", texto)
     texto = re.sub(r"\s+", " ", texto)
 
@@ -186,7 +284,6 @@ def extraer_texto_seccion_con_paginas_pdf(
         for page_num, page in enumerate(pdf.pages, start=1):
             textos_paginas.append((page_num, page.extract_text() or ""))
 
-    texto_completo = "\n".join(texto for _, texto in textos_paginas)
     texto = extraer_texto_seccion_pdf(pdf_path, titulo_seccion, siguiente_seccion)
     if not texto:
         return "", []
@@ -204,190 +301,21 @@ def extraer_nrc_desde_ruta(pdf_path: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def _section_payload(
-    *,
-    found: bool,
-    page_numbers: list[int] | None = None,
-    raw_evidence: str | None = None,
-    structured_data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if not found:
-        return {"found": False, "page_numbers": [], "raw_evidence": None, "structured_data": None}
+def generar_json_syllabus(pdf_path: str) -> dict[str, Any]:
+    requisitos_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_REQUISITOS, SECTION_NOTA_FINAL)
+    nota_final_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_NOTA_FINAL, SECTION_BIBLIOGRAFIA)
 
     return {
-        "found": True,
-        "page_numbers": page_numbers or [],
-        "raw_evidence": raw_evidence,
-        "structured_data": structured_data,
-    }
-
-
-def _evidencia_breve(texto: str, max_chars: int = 500) -> str | None:
-    texto_limpio = limpiar_texto(texto)
-    if not texto_limpio:
-        return None
-    if len(texto_limpio) <= max_chars:
-        return texto_limpio
-    return texto_limpio[:max_chars].rsplit(" ", 1)[0].strip() + "..."
-
-
-def _notas_en_texto(texto: str) -> list[float]:
-    notas = []
-    for match in re.finditer(r"\b([1-7](?:[.,]\d)?)\b", texto):
-        nota = parsear_ponderacion(match.group(1))
-        if nota is not None:
-            notas.append(nota)
-    return notas
-
-
-def _extraer_nota_por_contexto(texto: str, patrones: list[str]) -> float | None:
-    for patron in patrones:
-        match = re.search(patron, texto, re.IGNORECASE | re.DOTALL)
-        if match:
-            notas = _notas_en_texto(match.group(0))
-            if notas:
-                return notas[0]
-    return None
-
-
-def _extraer_frases_por_palabras(texto: str, palabras: list[str]) -> list[str]:
-    frases = []
-    for frase in re.split(r"(?<=[.;:])\s+", texto):
-        frase_limpia = limpiar_texto(frase)
-        if not frase_limpia:
-            continue
-        frase_normalizada = frase_limpia.lower()
-        if any(palabra in frase_normalizada for palabra in palabras):
-            frases.append(frase_limpia)
-    return frases
-
-
-def _estructurar_requisitos_aprobacion(texto: str) -> dict[str, Any]:
-    return {
-        "minimum_final_grade": _extraer_nota_por_contexto(
-            texto,
-            [
-                r"nota\s+m[ií]nima\s+(?:de\s+)?aprobaci[oó]n.{0,80}",
-                r"aprobar.{0,80}(?:nota|calificaci[oó]n).{0,30}",
-                r"nota\s+final.{0,80}(?:4[,.]0|cuatro)",
-            ],
-        ),
-        "minimum_exam_grade": _extraer_nota_por_contexto(
-            texto,
-            [
-                r"nota\s+m[ií]nima.{0,60}examen.{0,80}",
-                r"examen.{0,80}nota\s+m[ií]nima.{0,80}",
-                r"examen.{0,80}(?:3[,.]0|3[,.]5|4[,.]0)",
-            ],
-        ),
-        "automatic_failure_rules": _extraer_frases_por_palabras(
-            texto,
-            ["reprob", "reprueba", "reprobar", "automática", "automatica"],
-        ),
-        "grade_cap_rules": _extraer_frases_por_palabras(
-            texto,
-            ["tope", "máxima", "maxima", "nota máxima", "nota maxima"],
-        ),
-        "attendance_rules": _extraer_frases_por_palabras(texto, ["asistencia"]),
-    }
-
-
-def _estructurar_criterios_eximicion(texto: str) -> dict[str, Any]:
-    texto_normalizado = texto.lower()
-    is_available = None
-    if texto:
-        is_available = not any(palabra in texto_normalizado for palabra in ["no existe exim", "no contempla exim", "sin exim"])
-
-    return {
-        "is_available": is_available,
-        "threshold": _extraer_nota_por_contexto(
-            texto,
-            [
-                r"exim.{0,120}",
-                r"promedio.{0,80}(?:igual|superior|mayor).{0,40}",
-            ],
-        ),
-        "conditions": _extraer_frases_por_palabras(
-            texto,
-            ["exim", "promedio", "igual", "superior", "mayor", "sin notas", "reprob"],
-        ),
-    }
-
-
-def _estructurar_nota_final(texto: str) -> dict[str, Any]:
-    formula_match = re.search(r"\bNF\s*=\s*[^\s;,]+", texto, re.IGNORECASE)
-    presentation_match = re.search(r"\bNP\s*=\s*[^\s;,]+", texto, re.IGNORECASE)
-    porcentajes = [parsear_ponderacion(match.group(1)) for match in re.finditer(r"(\d+(?:[.,]\d+)?)\s*%", texto)]
-    porcentajes = [valor for valor in porcentajes if valor is not None]
-
-    return {
-        "presentation_grade_formula": limpiar_texto(presentation_match.group(0)) if presentation_match else None,
-        "final_grade_formula": limpiar_texto(formula_match.group(0)) if formula_match else limpiar_texto(texto),
-        "presentation_weight": porcentajes[0] if porcentajes else None,
-        "exam_weight": porcentajes[1] if len(porcentajes) > 1 else None,
-        "automatic_failure_rules": _extraer_frases_por_palabras(
-            texto,
-            ["reprob", "reprueba", "reprobar", "automática", "automatica"],
-        ),
-        "grade_cap_rules": _extraer_frases_por_palabras(
-            texto,
-            ["tope", "máxima", "maxima", "nota máxima", "nota maxima", "reemplaz"],
-        ),
+        "nrc": extraer_nrc_desde_ruta(pdf_path),
+        "evaluaciones": extraer_evaluaciones_y_ponderaciones_pdf(pdf_path),
+        "requisitos_aprobacion": requisitos_texto,
+        "nota_final": nota_final_texto,
     }
 
 
 def extract_normalized_syllabus_json_from_pdf(syllabus: Any) -> dict[str, Any]:
     pdf_path = str(syllabus.stored_path)
-    warnings: list[str] = []
-
-    evaluaciones, evaluaciones_pages, evaluaciones_evidence = extraer_evaluaciones_y_ponderaciones_con_pagina_pdf(pdf_path)
-    requisitos_texto, requisitos_pages = extraer_texto_seccion_con_paginas_pdf(pdf_path, SECTION_REQUISITOS, SECTION_NOTA_FINAL)
-    eximicion_texto, eximicion_pages = extraer_texto_seccion_con_paginas_pdf(pdf_path, SECTION_EXIMICION, SECTION_NOTA_FINAL)
-    nota_final_texto, nota_final_pages = extraer_texto_seccion_con_paginas_pdf(pdf_path, SECTION_NOTA_FINAL, SECTION_BIBLIOGRAFIA)
-
-    if not evaluaciones:
-        warnings.append(f"No se encontraron evaluaciones y ponderaciones para NRC {syllabus.nrc}.")
-    if not requisitos_texto:
-        warnings.append(f"No se encontró la sección de requisitos de aprobación para NRC {syllabus.nrc}.")
-    if not eximicion_texto:
-        warnings.append(f"No se encontró la sección de criterios de eximición para NRC {syllabus.nrc}.")
-    if not nota_final_texto:
-        warnings.append(f"No se encontró la sección de nota final para NRC {syllabus.nrc}.")
-
-    return {
-        "metadata": {
-            "course_code": syllabus.course_code,
-            "course_name": syllabus.course_name,
-            "nrc": syllabus.nrc,
-            "semester": syllabus.academic_period,
-            "academic_period": syllabus.academic_period,
-            "source_file": syllabus.original_filename,
-        },
-        "sections": {
-            "evaluaciones_y_ponderaciones": _section_payload(
-                found=bool(evaluaciones),
-                page_numbers=evaluaciones_pages,
-                raw_evidence=evaluaciones_evidence,
-                structured_data={"evaluations": evaluaciones} if evaluaciones else None,
-            ),
-            "requisitos_aprobacion": _section_payload(
-                found=bool(requisitos_texto),
-                page_numbers=requisitos_pages,
-                raw_evidence=_evidencia_breve(requisitos_texto),
-                structured_data=_estructurar_requisitos_aprobacion(requisitos_texto) if requisitos_texto else None,
-            ),
-            "criterios_eximicion": _section_payload(
-                found=bool(eximicion_texto),
-                page_numbers=eximicion_pages,
-                raw_evidence=_evidencia_breve(eximicion_texto),
-                structured_data=_estructurar_criterios_eximicion(eximicion_texto) if eximicion_texto else None,
-            ),
-            "nota_final": _section_payload(
-                found=bool(nota_final_texto),
-                page_numbers=nota_final_pages,
-                raw_evidence=_evidencia_breve(nota_final_texto),
-                structured_data=_estructurar_nota_final(nota_final_texto) if nota_final_texto else None,
-            ),
-        },
-        "warnings": warnings,
-    }
+    nrc = str(getattr(syllabus, "nrc", "") or "").strip() or extraer_nrc_desde_ruta(pdf_path)
+    result = generar_json_syllabus(pdf_path)
+    result["nrc"] = nrc
+    return result

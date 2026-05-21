@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-import httpx
+try:
+    from google import genai
+    from google.genai import types as genai_types
+except ImportError:  # pragma: no cover - exercised only in environments missing optional deps
+    genai = None
+    genai_types = None
 
 from app.config import get_settings
 
@@ -27,34 +32,35 @@ class JsonCompletionClient(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class OllamaJsonClient:
-    """HTTP client for local Ollama chat completions with JSON-schema output."""
+class GeminiJsonClient:
+    """Client for Gemini JSON completions through the Google Gen AI SDK."""
 
-    def __init__(self, base_url: str, model: str, timeout_seconds: int) -> None:
-        if not base_url:
-            raise AIConfigurationError("Falta configurar OLLAMA_BASE_URL para usar Ollama.")
+    def __init__(self, api_key: str, model: str, timeout_seconds: int) -> None:
+        if not api_key:
+            raise AIConfigurationError("Falta configurar GEMINI_API_KEY para usar Gemini.")
         if not model:
-            raise AIConfigurationError("Falta configurar LOCAL_LLM_MODEL para usar Ollama.")
+            raise AIConfigurationError("Falta configurar GEMINI_MODEL para usar Gemini.")
+        if genai is None:
+            raise AIConfigurationError("Falta instalar la dependencia google-genai para usar Gemini.")
 
-        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
+        self._client = self._build_client()
 
-    def _chat_url(self) -> str:
-        return f"{self.base_url}/api/chat"
+    def _build_client(self) -> Any:
+        kwargs: dict[str, Any] = {"api_key": self.api_key}
+        if genai_types is not None:
+            kwargs["http_options"] = genai_types.HttpOptions(
+                client_args={"timeout": self.timeout_seconds},
+            )
+        return genai.Client(**kwargs)
 
     @staticmethod
-    def _error_detail(response: httpx.Response) -> str:
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            return response.text.strip()
-
-        if isinstance(data, dict):
-            error = data.get("error")
-            if isinstance(error, str):
-                return error
-        return response.text.strip()
+    def _provider_error_message(exc: Exception) -> str:
+        code = getattr(exc, "code", None)
+        message = getattr(exc, "message", None) or str(exc)
+        return f"{code}: {message}" if code else message
 
     def complete_json(
         self,
@@ -64,74 +70,41 @@ class OllamaJsonClient:
         schema_name: str,
         schema: dict[str, Any],
     ) -> dict[str, Any]:
-        url = self._chat_url()
-        base_payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "stream": False,
-            "options": {"temperature": 0},
+        config: dict[str, Any] = {
+            "system_instruction": system_prompt,
+            "temperature": 0,
+            "response_mime_type": "application/json",
+            "response_json_schema": schema,
         }
 
-        payloads = [
-            {**base_payload, "format": schema},
-            {**base_payload, "format": "json"},
-        ]
-
-        response: httpx.Response | None = None
-        for payload_index, payload in enumerate(payloads):
-            try:
-                with httpx.Client(timeout=self.timeout_seconds) as client:
-                    response = client.post(url, json=payload)
-            except httpx.TimeoutException as exc:
-                raise AIProviderError(f"Ollama agotó el tiempo de espera en {url}: {exc}") from exc
-            except httpx.RequestError as exc:
-                raise AIProviderError(f"No se pudo conectar a Ollama en {url}: {exc}") from exc
-
-            if response.status_code == 404:
-                detail = self._error_detail(response)
-                detail_text = f" Detalle: {detail}." if detail else ""
-                raise AIProviderError(
-                    f"Ollama respondió 404 en {url}.{detail_text} Verifica que Ollama esté corriendo "
-                    f"y que el modelo {self.model} exista."
-                )
-
-            if response.status_code < 400:
-                break
-
-            should_try_fallback = payload_index == 0 and response.status_code in {400, 422}
-            if should_try_fallback:
-                error_text = response.text.lower()
-                if any(token in error_text for token in ["format", "schema", "json"]):
-                    continue
-
-            raise AIProviderError(f"Ollama respondió con error {response.status_code} en {url}: {response.text}")
-
-        if response is None:
-            raise AIProviderError(f"No se recibió respuesta válida de Ollama en {url}.")
-
         try:
-            data = response.json()
-        except json.JSONDecodeError as exc:
-            raise AIProviderError("Ollama devolvió una respuesta no JSON.") from exc
+            response = self._client.models.generate_content(
+                model=self.model,
+                contents=user_prompt,
+                config=config,
+            )
+        except Exception as exc:
+            detail = self._provider_error_message(exc)
+            raise AIProviderError(f"Gemini falló al generar {schema_name}: {detail}") from exc
 
-        message = data.get("message") or {}
-        text = message.get("content") if isinstance(message, dict) else None
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, dict):
+            return parsed
+
+        text = getattr(response, "text", None)
         if not text:
-            raise AIProviderError("Ollama no devolvió contenido para el análisis.")
+            raise AIProviderError("Gemini no devolvió contenido para el análisis.")
 
         try:
             return json.loads(text)
         except json.JSONDecodeError as exc:
-            raise AIProviderError("Ollama no devolvió JSON válido.") from exc
+            raise AIProviderError("Gemini no devolvió JSON válido.") from exc
 
 
 def get_json_client() -> JsonCompletionClient:
     settings = get_settings()
-    return OllamaJsonClient(
-        base_url=settings.ollama_base_url,
-        model=settings.local_model,
+    return GeminiJsonClient(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
         timeout_seconds=settings.ai_request_timeout_seconds,
     )

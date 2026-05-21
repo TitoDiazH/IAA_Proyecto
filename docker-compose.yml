@@ -25,15 +25,13 @@ services:
       STORAGE_DIR: /app/storage
       ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       MAX_UPLOAD_MB: 100
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-300}
     ports:
       - "8000:8000"
     volumes:
       - backend_storage:/app/storage
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -48,21 +46,6 @@ services:
     depends_on:
       - backend
 
-  ollama:
-    image: ollama/ollama:latest
-    profiles:
-      - container-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/var/lib/ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-
 volumes:
   postgres_data:
   backend_storage:
-  ollama_data:

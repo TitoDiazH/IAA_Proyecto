@@ -1,27 +1,17 @@
 # MVP revisión académica de syllabus
 
-Configura Ollama en `.env` con:
+Configura Gemini en `.env` con:
 
 ```bash
-OLLAMA_BASE_URL=http://ollama:11434
-LOCAL_LLM_MODEL=qwen2.5:7b
+GEMINI_API_KEY=tu_api_key
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-Si ejecutas el backend sin Docker, usa `OLLAMA_BASE_URL=http://localhost:11434`.
 ## Ejecutar
 
 ```bash
 docker compose up
 ```
-
-En una terminal separada, descarga el modelo dentro del contenedor de Ollama la primera vez:
-
-```bash
-docker compose exec ollama ollama pull qwen2.5:7b
-docker compose exec ollama ollama list
-```
-
-Si `ollama list` no muestra `qwen2.5:7b`, el analisis fallara con `model not found`.
 
 Servicios:
 
@@ -44,8 +34,8 @@ Variables útiles:
 - `ALLOWED_ORIGINS`: orígenes permitidos por CORS.
 - `MAX_UPLOAD_MB`: tamaño máximo del ZIP.
 - `AI_REQUEST_TIMEOUT_SECONDS`: timeout por llamada a IA. La IA solo compara JSON estructurados.
-- `OLLAMA_BASE_URL`: URL del servidor local de Ollama.
-- `LOCAL_LLM_MODEL`: modelo local a usar con Ollama.
+- `GEMINI_API_KEY`: API key de Gemini usada por el backend.
+- `GEMINI_MODEL`: modelo de Gemini a usar para la comparación.
 
 Usa `.env.example` como referencia. El archivo `.env` local no se versiona.
 
@@ -171,6 +161,6 @@ Con dos syllabus, el sistema solo reporta diferencias entre ambos. Con tres o m�
 - No analiza bibliografía ni cronograma completo.
 - No integra Canvas ni otros sistemas institucionales.
 - No incluye OCR; PDFs escaneados o imagen pueden quedar sin texto.
-- El análisis depende de la disponibilidad y rendimiento del servidor local de Ollama.
+- El análisis depende de la disponibilidad de la API de Gemini y de la validez de `GEMINI_API_KEY`.
 - La comparación depende de la calidad del JSON extraído por código.
 - No hay autenticación ni roles de usuario.

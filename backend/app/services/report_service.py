@@ -32,7 +32,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
                     "course_code": course.course_code,
                     "course_name": course.course_name,
                 },
-                "analysis_provider": "ollama",
+                "analysis_provider": "gemini",
                 "message": "Se requiere al menos dos syllabus para comparar un curso.",
                 "compared_count": len(syllabi),
                 "severity_counts": {},
@@ -56,6 +56,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
     elapsed = round(time.perf_counter() - started_at, 3)
     summary = comparison["summary"]
     summary["course"] = comparison.get("course", course_metadata)
+    summary["analysis_provider"] = "gemini"
 
     report = AnalysisReport(
         course_group_id=course.id,
