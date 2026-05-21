@@ -67,6 +67,45 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatEvaluationEvidence(row) {
+  const parts = [];
+  if (row.tipo) parts.push(row.tipo);
+  if (row.ponderacion !== null && row.ponderacion !== undefined) {
+    parts.push(`${row.ponderacion}%`);
+  }
+  if (row.descripcion) parts.push(row.descripcion);
+  return parts.join(" · ");
+}
+
+function normalizeEvaluationRow(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const tipo = String(value.tipo || value.type || "").trim();
+  const descripcion = String(value.descripcion || value.description || "").trim();
+  const rawPonderacion = value.ponderacion ?? value.percentage ?? value.weight ?? null;
+  const ponderacion =
+    rawPonderacion === null || rawPonderacion === undefined || rawPonderacion === ""
+      ? null
+      : String(rawPonderacion).trim();
+
+  if (!tipo && !descripcion && !ponderacion) return null;
+  return { tipo, ponderacion, descripcion };
+}
+
+function parseEvaluationEvidenceText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    const evaluationRows = rows.map(normalizeEvaluationRow).filter(Boolean);
+    return evaluationRows.length ? evaluationRows : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeEvidence(evidence) {
   if (!evidence) return [];
 
@@ -77,11 +116,19 @@ function normalizeEvidence(evidence) {
       : [];
 
   return items
-    .map((item) => ({
-      nrc: String(item?.nrc || "").trim(),
-      page: item?.page ?? null,
-      text: String(item?.text || item?.quote || item?.citation || "").trim(),
-    }))
+    .map((item) => {
+      const rawText = String(item?.text || item?.quote || item?.citation || "").trim();
+      const evaluationRows = parseEvaluationEvidenceText(rawText);
+      return {
+        nrc: String(item?.nrc || "").trim(),
+        page: item?.page ?? null,
+        text: evaluationRows
+          ? evaluationRows.map(formatEvaluationEvidence).join(" | ")
+          : rawText,
+        matchText: rawText,
+        evaluationRows,
+      };
+    })
     .filter((item) => item.nrc && item.text);
 }
 
@@ -162,9 +209,103 @@ function textItemToRect(item, viewport) {
   };
 }
 
+function normalizeWeight(value) {
+  const match = String(value || "").match(/\d+(?:[.,]\d+)?/);
+  if (!match) return null;
+  const parsed = Number.parseFloat(match[0].replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function textHasWeight(text, expectedWeight) {
+  if (!Number.isFinite(expectedWeight)) return false;
+  const matches = String(text || "").match(/\d+(?:[.,]\d+)?\s*%?/g) || [];
+  return matches.some((match) => {
+    const parsed = normalizeWeight(match);
+    return Number.isFinite(parsed) && Math.abs(parsed - expectedWeight) < 0.01;
+  });
+}
+
+function hasMeaningfulTerm(rowText, value) {
+  const term = normalizeForMatch(value);
+  return term.length >= 3 && rowText.includes(term);
+}
+
+function evaluationRowScore(rowText, row) {
+  const expectedWeight = normalizeWeight(row.ponderacion);
+  const checks = [
+    Boolean(row.tipo) && hasMeaningfulTerm(rowText, row.tipo),
+    expectedWeight !== null && textHasWeight(rowText, expectedWeight),
+    Boolean(row.descripcion) && hasMeaningfulTerm(rowText, row.descripcion),
+  ];
+  return checks.filter(Boolean).length;
+}
+
+function groupTextItemsByLine(textItems, viewport) {
+  const items = textItems
+    .map((item, index) => {
+      const rect = textItemToRect(item, viewport);
+      return {
+        index,
+        rect,
+        centerY: rect.top + rect.height / 2,
+        text: normalizeForMatch(item.str),
+      };
+    })
+    .filter((item) => item.text);
+
+  const rows = [];
+  for (const item of items.sort((a, b) => a.centerY - b.centerY)) {
+    const row = rows.find((candidate) => Math.abs(candidate.centerY - item.centerY) <= 7);
+    if (row) {
+      row.items.push(item);
+      row.centerY =
+        row.items.reduce((sum, current) => sum + current.centerY, 0) / row.items.length;
+    } else {
+      rows.push({ centerY: item.centerY, items: [item] });
+    }
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    items: row.items.sort((a, b) => a.rect.left - b.rect.left),
+    text: row.items.map((item) => item.text).join(" "),
+  }));
+}
+
+function findEvaluationRowItemIndexes(textItems, viewport, evaluationRows) {
+  if (!evaluationRows?.length) return [];
+
+  const matchedIndexes = new Set();
+  const textRows = groupTextItemsByLine(textItems, viewport);
+
+  for (const evaluationRow of evaluationRows) {
+    let bestMatch = null;
+    for (const textRow of textRows) {
+      const score = evaluationRowScore(textRow.text, evaluationRow);
+      if (!score) continue;
+
+      const expectedWeight = normalizeWeight(evaluationRow.ponderacion);
+      const minimumScore = expectedWeight !== null ? 2 : 1;
+      if (score < minimumScore) continue;
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { score, textRow };
+      }
+    }
+
+    bestMatch?.textRow.items.forEach((item) => matchedIndexes.add(item.index));
+  }
+
+  return Array.from(matchedIndexes);
+}
+
 function buildHighlightRects(textItems, viewport, highlights, activeHighlightId) {
   return highlights.flatMap((highlight, highlightIndex) => {
-    const matchedIndexes = findMatchingItemIndexes(textItems, highlight.text);
+    const structuredIndexes = highlight.evaluationRows?.length
+      ? findEvaluationRowItemIndexes(textItems, viewport, highlight.evaluationRows)
+      : [];
+    const matchedIndexes = structuredIndexes.length
+      ? structuredIndexes
+      : findMatchingItemIndexes(textItems, highlight.text);
     return matchedIndexes.map((itemIndex) => ({
       ...textItemToRect(textItems[itemIndex], viewport),
       color: highlight.color,
