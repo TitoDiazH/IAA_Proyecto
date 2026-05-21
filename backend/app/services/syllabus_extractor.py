@@ -107,6 +107,7 @@ def limpiar_texto(valor: Any) -> str | None:
         return None
 
     texto = str(valor).replace("\n", " ").strip()
+    texto = re.sub(r"\bPage\s+\d+\s+of\s+\d+\b", " ", texto, flags=re.IGNORECASE)
     texto = re.sub(r"\s+", " ", texto)
 
     return texto if texto else None
@@ -139,6 +140,83 @@ def _lineas_evaluaciones(texto: str) -> list[str]:
 
 def _termina_frase(texto: str) -> bool:
     return texto.rstrip().endswith((".", ";", ":"))
+
+
+def _normalizar_celda(valor: Any) -> str | None:
+    return limpiar_texto(valor)
+
+
+def _indice_columna(row: list[Any], patrones: list[str]) -> int | None:
+    for index, cell in enumerate(row):
+        text = _normalizar_celda(cell) or ""
+        text = text.lower()
+        if all(patron in text for patron in patrones):
+            return index
+    return None
+
+
+def _parsear_evaluaciones_desde_filas_tabla(rows: list[list[Any]]) -> list[dict[str, Any]]:
+    evaluaciones: list[dict[str, Any]] = []
+    tipo_index: int | None = None
+    ponderacion_index: int | None = None
+    descripcion_index: int | None = None
+    in_evaluaciones = False
+
+    for row in rows:
+        normalized_row = [_normalizar_celda(cell) for cell in row]
+        row_text = " ".join(cell for cell in normalized_row if cell)
+
+        if SECTION_EVALUACIONES.lower() in row_text.lower():
+            in_evaluaciones = True
+            continue
+
+        if in_evaluaciones and any(section.lower() in row_text.lower() for section in NEXT_SECTIONS_AFTER_EVALUACIONES):
+            break
+
+        current_tipo_index = _indice_columna(row, ["tipo", "evaluaci"])
+        current_ponderacion_index = _indice_columna(row, ["ponder"])
+        current_descripcion_index = _indice_columna(row, ["descrip"])
+        if (
+            current_tipo_index is not None
+            and current_ponderacion_index is not None
+            and current_descripcion_index is not None
+        ):
+            tipo_index = current_tipo_index
+            ponderacion_index = current_ponderacion_index
+            descripcion_index = current_descripcion_index
+            in_evaluaciones = True
+            continue
+
+        if not in_evaluaciones or tipo_index is None or ponderacion_index is None or descripcion_index is None:
+            continue
+
+        tipo = normalized_row[tipo_index] if tipo_index < len(normalized_row) else None
+        ponderacion = normalized_row[ponderacion_index] if ponderacion_index < len(normalized_row) else None
+        descripcion = normalized_row[descripcion_index] if descripcion_index < len(normalized_row) else None
+
+        if not tipo or parsear_ponderacion(ponderacion or "") is None:
+            continue
+
+        evaluaciones.append(
+            {
+                "tipo": tipo,
+                "ponderacion": parsear_ponderacion(ponderacion),
+                "descripcion": descripcion,
+            }
+        )
+
+    return evaluaciones
+
+
+def _extraer_evaluaciones_desde_tablas_pdf(pdf: Any, paginas_seccion: list[int]) -> list[dict[str, Any]]:
+    for page_num in paginas_seccion:
+        page = pdf.pages[page_num - 1]
+        for table in page.find_tables():
+            evaluaciones = _parsear_evaluaciones_desde_filas_tabla(table.extract())
+            if evaluaciones:
+                return evaluaciones
+
+    return []
 
 
 def _parsear_evaluaciones_desde_texto(texto: str) -> list[dict[str, Any]]:
@@ -221,6 +299,13 @@ def extraer_evaluaciones_y_ponderaciones_con_pagina_pdf(pdf_path: str) -> tuple[
         if not paginas_seccion:
             return [], [], None
 
+        evaluaciones = _extraer_evaluaciones_desde_tablas_pdf(pdf, paginas_seccion)
+        if evaluaciones:
+            return evaluaciones, paginas_seccion, " | ".join(
+                f"{item['tipo']}: {item['ponderacion']}% ({item['descripcion'] or 'sin descripción'})"
+                for item in evaluaciones
+            )
+
     texto = extraer_texto_seccion_pdf(
         pdf_path,
         SECTION_EVALUACIONES,
@@ -267,10 +352,7 @@ def extraer_texto_seccion_pdf(
     if layout:
         return texto.strip()
 
-    texto = re.sub(r"\s*\n+\s*", " ", texto)
-    texto = re.sub(r"\s+", " ", texto)
-
-    return texto.strip()
+    return limpiar_texto(texto) or ""
 
 
 def extraer_texto_seccion_con_paginas_pdf(

@@ -12,6 +12,9 @@ class FakePage:
     def extract_tables(self):
         return self.tables
 
+    def find_tables(self):
+        return []
+
 
 class FakePdf:
     def __init__(self, pages):
