@@ -23,6 +23,8 @@ def _get_or_create_course_group(db: Session, parsed) -> CourseGroup:
         .one_or_none()
     )
     if group:
+        if group.course_name != parsed.course_name:
+            group.course_name = parsed.course_name
         return group
 
     group = CourseGroup(
@@ -129,4 +131,3 @@ def process_zip_upload(db: Session, filename: str, content: bytes) -> dict:
         "course_ids": sorted(course_ids),
         "message": f"Se cargaron {accepted} syllabus PDF",
     }
-

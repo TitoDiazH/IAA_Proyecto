@@ -6,6 +6,7 @@ import unicodedata
 from typing import Any
 
 from app.services.ai_client import AIProviderError, JsonCompletionClient
+from app.services.filename_parser import normalize_course_name
 from app.services.syllabus_prompts import (
     SYLLABUS_COMPARISON_SCHEMA,
     SYLLABUS_COMPARISON_SYSTEM_PROMPT,
@@ -160,7 +161,9 @@ def _normalize_comparison_result(
     nrcs = list(normalized_syllabi.keys())
     course = raw_result.get("course") if isinstance(raw_result.get("course"), dict) else {}
     course_code = _normalize_scalar(course.get("course_code")) or course_metadata.get("course_code")
-    course_name = _normalize_scalar(course.get("course_name")) or course_metadata.get("course_name")
+    course_name = normalize_course_name(
+        _normalize_scalar(course.get("course_name")) or course_metadata.get("course_name")
+    )
     compared_nrcs = [str(nrc) for nrc in course.get("nrcs_compared", []) if str(nrc).strip()] or nrcs
 
     raw_summary = raw_result.get("summary") if isinstance(raw_result.get("summary"), dict) else {}

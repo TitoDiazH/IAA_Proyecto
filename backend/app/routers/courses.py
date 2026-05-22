@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import AnalysisReport, CourseGroup, Syllabus
 from app.schemas import CourseDetail, CourseListItem, ReportRead, SyllabusRead
 from app.services.ai_client import AIConfigurationError, AIProviderError
+from app.services.filename_parser import normalize_course_name
 from app.services.report_service import analyze_course
 
 
@@ -39,7 +40,7 @@ def list_courses(db: Session = Depends(get_db)) -> list[CourseListItem]:
                 term=group.term,
                 career=group.career,
                 course_code=group.course_code,
-                course_name=group.course_name,
+                course_name=normalize_course_name(group.course_name),
                 syllabus_count=len(group.syllabi),
                 latest_report_id=latest.id if latest else None,
                 latest_report_status=latest.status if latest else None,
@@ -70,7 +71,7 @@ def get_course(course_id: int, db: Session = Depends(get_db)) -> CourseDetail:
         term=group.term,
         career=group.career,
         course_code=group.course_code,
-        course_name=group.course_name,
+        course_name=normalize_course_name(group.course_name),
         syllabi=[SyllabusRead.model_validate(syllabus) for syllabus in syllabi],
         latest_report_id=latest.id if latest else None,
     )

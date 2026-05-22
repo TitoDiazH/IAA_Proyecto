@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import AnalysisReport, CourseGroup, Inconsistency, Syllabus
 from app.services.ai_analyzer import analyze_syllabi
+from app.services.filename_parser import normalize_course_name
 
 
 def analyze_course(db: Session, course_id: int) -> AnalysisReport:
@@ -19,6 +20,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
         raise ValueError("Curso no encontrado")
 
     syllabi: list[Syllabus] = sorted(course.syllabi, key=lambda item: item.nrc)
+    course_name = normalize_course_name(course.course_name)
     started_at = time.perf_counter()
 
     if len(syllabi) < 2:
@@ -30,7 +32,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
                 "course": {
                     "academic_period": course.academic_period,
                     "course_code": course.course_code,
-                    "course_name": course.course_name,
+                    "course_name": course_name,
                 },
                 "analysis_provider": "gemini",
                 "message": "Se requiere al menos dos syllabus para comparar un curso.",
@@ -50,7 +52,7 @@ def analyze_course(db: Session, course_id: int) -> AnalysisReport:
         "term": course.term,
         "career": course.career,
         "course_code": course.course_code,
-        "course_name": course.course_name,
+        "course_name": course_name,
     }
     comparison = analyze_syllabi(syllabi, course_metadata)
     elapsed = round(time.perf_counter() - started_at, 3)
