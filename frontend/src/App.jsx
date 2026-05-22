@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { analyzeCourse, getCourse, getLatestReport, listCourses } from "./api";
+import {
+  analyzeCourse,
+  getConditionsExportTable,
+  getCourse,
+  getLatestReport,
+  listCourses,
+} from "./api";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
 
@@ -41,6 +47,7 @@ function updateBrowserRoute(route, { replace = false } = {}) {
 export default function App() {
   const [route, setRoute] = useState(parseRoute);
   const [courses, setCourses] = useState([]);
+  const [exportTable, setExportTable] = useState(null);
   const [activeCourse, setActiveCourse] = useState(null);
   const [report, setReport] = useState(null);
   const [loadingCourses, setLoadingCourses] = useState(true);
@@ -52,8 +59,12 @@ export default function App() {
     setLoadingCourses(true);
     setError(null);
     try {
-      const data = await listCourses();
+      const [data, table] = await Promise.all([
+        listCourses(),
+        getConditionsExportTable(),
+      ]);
       setCourses(data);
+      setExportTable(table);
     } catch (exc) {
       setError(exc.message);
     } finally {
@@ -188,6 +199,7 @@ export default function App() {
       {route.view === "home" ? (
         <Homepage
           courses={courses}
+          exportTable={exportTable}
           loading={loadingCourses}
           onOpenCourse={openCourse}
           onRefresh={refreshCourses}

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db
-from app.routers import courses, reports, uploads
+from app.routers import courses, exports, reports, uploads
 from app.services.analysis_queue import start_analysis_worker
 
 
@@ -30,6 +30,7 @@ app.add_middleware(
 app.include_router(uploads.router)
 app.include_router(courses.router)
 app.include_router(reports.router)
+app.include_router(exports.router)
 
 
 @app.get("/api/health")

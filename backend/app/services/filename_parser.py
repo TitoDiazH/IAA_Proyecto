@@ -85,12 +85,15 @@ def parse_syllabus_filename(filename: str) -> ParsedSyllabusFilename:
     if not career or not course_code or not course_name:
         raise FilenameParseError("Carrera, código de curso y nombre de ramo son obligatorios")
 
+    career_code = career.strip().upper()
+    base_course_code = course_code.strip().upper()
+
     return ParsedSyllabusFilename(
         academic_period=academic_period,
         year=int(academic_period[:4]),
         term=academic_period[4:],
-        career=career.strip().upper(),
-        course_code=course_code.strip().upper(),
+        career=career_code,
+        course_code=f"{career_code}{base_course_code}",
         nrc=nrc_number.strip(),
         course_name=normalize_course_name(course_name),
     )

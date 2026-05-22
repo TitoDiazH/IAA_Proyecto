@@ -37,6 +37,22 @@ export function uploadZip(file) {
   return request("/uploads/zip", { method: "POST", body });
 }
 
+export function getConditionsExportTable() {
+  return request("/exports/conditions");
+}
+
+export async function downloadConditionsExport({ format, filename }) {
+  const params = new URLSearchParams({
+    format,
+    filename: filename || "condiciones-aprobacion",
+  });
+  const response = await fetch(`${API_BASE}/exports/conditions/download?${params}`);
+  if (!response.ok) {
+    throw new Error(response.statusText || "No se pudo exportar la tabla");
+  }
+  return response.blob();
+}
+
 export function syllabusDownloadUrl(syllabusId) {
   return `${API_BASE}/courses/syllabi/${syllabusId}/download`;
 }

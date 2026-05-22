@@ -385,12 +385,14 @@ def extraer_nrc_desde_ruta(pdf_path: str) -> str:
 
 def generar_json_syllabus(pdf_path: str) -> dict[str, Any]:
     requisitos_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_REQUISITOS, SECTION_NOTA_FINAL)
+    eximicion_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_EXIMICION, SECTION_NOTA_FINAL)
     nota_final_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_NOTA_FINAL, SECTION_BIBLIOGRAFIA)
 
     return {
         "nrc": extraer_nrc_desde_ruta(pdf_path),
         "evaluaciones": extraer_evaluaciones_y_ponderaciones_pdf(pdf_path),
         "requisitos_aprobacion": requisitos_texto,
+        "criterios_eximicion": eximicion_texto,
         "nota_final": nota_final_texto,
     }
 

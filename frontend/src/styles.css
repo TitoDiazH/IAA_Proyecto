@@ -561,6 +561,205 @@ a {
   font-weight: 700;
 }
 
+.export-section {
+  margin-top: var(--space-10);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+}
+
+.export-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.export-section-header h2 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-2xl);
+  line-height: 1.2;
+  font-weight: 850;
+  letter-spacing: 0;
+  color: var(--color-heading);
+}
+
+.export-section-header p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.export-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.export-name-input,
+.export-format-select {
+  min-height: 2.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.export-name-input {
+  width: min(18rem, 100%);
+  padding: 0 var(--space-3);
+}
+
+.export-format-select {
+  padding: 0 var(--space-8) 0 var(--space-3);
+}
+
+.export-name-input:focus,
+.export-format-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.export-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 7rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.export-empty-state p {
+  margin: 0;
+}
+
+.export-table-wrap {
+  max-height: 34rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.export-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.export-table th,
+.export-table td {
+  min-width: 8rem;
+  max-width: 18rem;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-align: left;
+  vertical-align: top;
+}
+
+.export-table thead th {
+  background: var(--color-surface-strong);
+  color: var(--color-heading);
+  font-weight: 850;
+}
+
+.export-table tbody td {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(15, 28, 20, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.export-modal {
+  width: min(100%, 31rem);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: 0 24px 70px rgba(15, 28, 20, 0.24);
+}
+
+.export-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.export-modal-header h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xl);
+  line-height: 1.2;
+  color: var(--color-heading);
+}
+
+.export-modal-header p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.modal-close-button {
+  flex-shrink: 0;
+}
+
+.export-modal-body {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+
+.export-field {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.export-field span {
+  color: var(--color-heading);
+  font-size: var(--text-sm);
+  font-weight: 800;
+}
+
+.export-field .export-name-input,
+.export-field .export-format-select {
+  width: 100%;
+}
+
+.export-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6) var(--space-6);
+  background: var(--color-surface-muted);
+  border-top: 1px solid var(--color-border);
+}
+
 .course-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
@@ -933,25 +1132,22 @@ a {
 }
 
 .syllabus-track {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
   gap: var(--space-3);
   width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity;
-  padding: 0 0 var(--space-4);
+  padding: 0;
   margin: 0;
 }
 
 .syllabus-tab {
-  flex: 0 0 18rem;
   min-width: 0;
-  scroll-snap-align: start;
+  min-height: 5.75rem;
   text-align: left;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   color: var(--color-heading);
   box-shadow: var(--shadow-xs);
   transition:
@@ -1652,6 +1848,30 @@ th {
     gap: var(--space-2);
   }
 
+  .export-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .export-controls {
+    justify-content: stretch;
+  }
+
+  .export-name-input,
+  .export-format-select,
+  .export-controls .primary-button {
+    width: 100%;
+  }
+
+  .export-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .export-modal-actions .primary-button,
+  .export-modal-actions .ghost-button {
+    width: 100%;
+  }
+
   .documents-overview,
   .syllabus-viewer,
   .report {
@@ -1667,7 +1887,7 @@ th {
   }
 
   .syllabus-tab {
-    flex-basis: 15rem;
+    min-height: 5.25rem;
   }
 
   .pdf-carousel-shell {

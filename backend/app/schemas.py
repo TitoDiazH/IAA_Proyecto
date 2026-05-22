@@ -90,3 +90,10 @@ class UploadResponse(BaseModel):
     course_ids: list[int]
     queued_report_ids: list[int] = []
     message: str
+
+
+class ConditionsExportTable(BaseModel):
+    header_rows: list[list[str]]
+    columns: list[str]
+    rows: list[list[str]]
+    row_count: int

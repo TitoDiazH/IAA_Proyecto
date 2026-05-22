@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   BookOpen,
   CircleCheck,
+  Download,
   FileArchive,
   FileText,
   Loader2,
@@ -9,8 +10,8 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useState } from "react";
-import { uploadZip } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { downloadConditionsExport, uploadZip } from "../api";
 
 // ─── Color palette for course cards ─────────────────────────────────────────
 const PALETTE = [
@@ -219,10 +220,209 @@ function CourseCard({ course, onClick }) {
   );
 }
 
+function ConditionsExportPreview({ table }) {
+  const [filename, setFilename] = useState("condiciones-aprobacion");
+  const [format, setFormat] = useState("xlsx");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState(null);
+  const filenameInputRef = useRef(null);
+  const headerRows = table?.header_rows || [];
+  const rows = table?.rows || [];
+
+  useEffect(() => {
+    if (!modalOpen) return undefined;
+
+    const timeout = window.setTimeout(() => filenameInputRef.current?.focus(), 0);
+    function handleKeyDown(event) {
+      if (event.key === "Escape" && !exporting) {
+        setModalOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [exporting, modalOpen]);
+
+  async function handleExport() {
+    setExporting(true);
+    setError(null);
+    try {
+      const blob = await downloadConditionsExport({ format, filename });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${filename || "condiciones-aprobacion"}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      setModalOpen(false);
+    } catch (exc) {
+      setError(exc.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <section className="export-section" aria-label="Tabla exportable de condiciones">
+      <div className="export-section-header">
+        <div>
+          <h2>Tabla de condiciones</h2>
+          <p>
+            {rows.length} fila{rows.length !== 1 ? "s" : ""} listas para exportar
+          </p>
+        </div>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => {
+            setError(null);
+            setModalOpen(true);
+          }}
+          disabled={rows.length === 0}
+        >
+          <Download size={18} />
+          Exportar
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="export-empty-state">
+          <FileText size={28} aria-hidden="true" />
+          <p>La tabla aparecerá cuando finalice al menos un análisis.</p>
+        </div>
+      ) : (
+        <div className="export-table-wrap">
+          <table className="export-table">
+            <thead>
+              {headerRows.map((headerRow, rowIndex) => (
+                <tr key={`header-${rowIndex}`}>
+                  {headerRow.map((cell, cellIndex) => (
+                    <th key={`${rowIndex}-${cellIndex}`}>{cell}</th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {modalOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !exporting) {
+              setModalOpen(false);
+            }
+          }}
+        >
+          <div
+            className="export-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-modal-title"
+          >
+            <div className="export-modal-header">
+              <div>
+                <h3 id="export-modal-title">Exportar tabla</h3>
+                <p>
+                  {rows.length} fila{rows.length !== 1 ? "s" : ""} disponibles
+                </p>
+              </div>
+              <button
+                type="button"
+                className="icon-button modal-close-button"
+                onClick={() => setModalOpen(false)}
+                disabled={exporting}
+                aria-label="Cerrar"
+                title="Cerrar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="export-modal-body">
+              <label className="export-field">
+                <span>Nombre</span>
+                <input
+                  ref={filenameInputRef}
+                  className="export-name-input"
+                  type="text"
+                  value={filename}
+                  onChange={(event) => setFilename(event.target.value)}
+                />
+              </label>
+
+              <label className="export-field">
+                <span>Formato</span>
+                <select
+                  className="export-format-select"
+                  value={format}
+                  onChange={(event) => setFormat(event.target.value)}
+                >
+                  <option value="xlsx">XLSX</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </label>
+
+              {error && <p className="message error">{error}</p>}
+            </div>
+
+            <div className="export-modal-actions">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setModalOpen(false)}
+                disabled={exporting}
+              >
+                Cancelar
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={handleExport}
+                disabled={exporting}
+              >
+                {exporting ? (
+                  <Loader2 className="spin" size={18} />
+                ) : (
+                  <Download size={18} />
+                )}
+                {exporting ? "Exportando…" : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // HOME VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function Homepage({ courses, loading, onOpenCourse, onRefresh }) {
+export default function Homepage({
+  courses,
+  exportTable,
+  loading,
+  onOpenCourse,
+  onRefresh,
+}) {
   return (
     <div className="home-view">
       <header className="app-header">
@@ -274,6 +474,8 @@ export default function Homepage({ courses, loading, onOpenCourse, onRefresh }) 
           </div>
         )}
       </div>
+
+      <ConditionsExportPreview table={exportTable} />
     </div>
   );
 }

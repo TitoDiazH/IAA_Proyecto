@@ -148,6 +148,7 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
     summary = comparison["summary"]
     summary["course"] = comparison.get("course", course_metadata)
     summary["analysis_provider"] = "gemini"
+    summary["normalized_syllabi_by_nrc"] = comparison.get("normalized_syllabi_by_nrc", {})
 
     if report is None:
         report = AnalysisReport(course_group_id=course.id)

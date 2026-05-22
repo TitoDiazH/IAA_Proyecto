@@ -9,7 +9,7 @@ def test_parse_expected_filename():
     assert parsed.year == 2026
     assert parsed.term == "10"
     assert parsed.career == "ING"
-    assert parsed.course_code == "2207"
+    assert parsed.course_code == "ING2207"
     assert parsed.nrc == "7542"
     assert parsed.course_name == "Termodinamica"
 

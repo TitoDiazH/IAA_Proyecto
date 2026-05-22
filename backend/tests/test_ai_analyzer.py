@@ -31,6 +31,28 @@ class FakeAIClient:
             }
         )
 
+        if schema_name == "conditions_export":
+            return {
+                "rows": [
+                    {
+                        "nrc": "7542",
+                        "requisitos_aprobacion": "NF>=4",
+                        "requisitos_exencion": "NP>=5.5",
+                        "nota_final": "NF=0.7NP+0.3EX",
+                        "nota_final_reprobados": "Si NP<3 -> NF=NP",
+                        "otros_criterios": "",
+                    },
+                    {
+                        "nrc": "7543",
+                        "requisitos_aprobacion": "NF>=4",
+                        "requisitos_exencion": "NP>=5.8",
+                        "nota_final": "NF=0.7NP+0.3EX",
+                        "nota_final_reprobados": "Si NP<3 -> NF=NP",
+                        "otros_criterios": "",
+                    },
+                ]
+            }
+
         return {
             "course": {
                 "course_code": "2207",
@@ -190,10 +212,13 @@ NF = 0.7 NP + 0.3 EX
 
     extraction_calls = [call for call in client.calls if call["schema_name"] == "syllabus_extraction"]
     comparison_calls = [call for call in client.calls if call["schema_name"] == "syllabus_comparison"]
+    export_calls = [call for call in client.calls if call["schema_name"] == "conditions_export"]
 
     assert extracted_nrcs == ["7542", "7543"]
     assert len(extraction_calls) == 0
+    assert len(export_calls) == 1
     assert len(comparison_calls) == 1
+    assert result["normalized_syllabi_by_nrc"]["7542"]["conditions_export"]["nota_final"] == "NF=0.7NP+0.3EX"
     assert result["summary"]["course"]["course_code"] == "2207"
     assert result["summary"]["severity_counts"]["Crítica"] == 1
     assert result["summary"]["possible_outlier"]["nrc"] == "7543"
