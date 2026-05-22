@@ -1,5 +1,7 @@
 import {
+  AlertTriangle,
   BookOpen,
+  CircleCheck,
   FileArchive,
   FileText,
   Loader2,
@@ -150,18 +152,40 @@ function UploadZone({ onUploaded }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 function CourseCard({ course, onClick }) {
   const color = courseColor(course.id);
-  const hasReport = !!course.latest_report_id;
+  const status = course.latest_report_status;
+  const isProcessing = ["queued", "processing"].includes(status);
+  const inconsistencyCount = course.latest_report_inconsistency_count ?? 0;
+  const hasInconsistencies = status === "completed" && inconsistencyCount > 0;
+  const isClean = status === "completed" && inconsistencyCount === 0;
+  const statusLabel =
+    hasInconsistencies
+      ? `${inconsistencyCount} hallazgo${inconsistencyCount !== 1 ? "s" : ""}`
+      : isClean
+        ? "Sin hallazgos"
+      : status === "queued"
+        ? "En cola"
+        : status === "processing"
+          ? "Analizando"
+          : status === "failed"
+            ? "Error"
+            : "Pendiente";
 
   return (
     <button
-      className="course-card"
+      className={`course-card ${isProcessing ? "course-card--processing" : ""}`}
       style={{
         "--card-bg": color.bg,
         "--card-border": color.border,
         "--card-accent": color.accent,
       }}
       onClick={onClick}
-      aria-label={`Abrir curso ${course.course_name}`}
+      disabled={isProcessing}
+      aria-label={
+        isProcessing
+          ? `${course.course_name} está siendo analizado`
+          : `Abrir curso ${course.course_name}`
+      }
+      title={isProcessing ? "Disponible cuando finalice el análisis" : undefined}
     >
       <div className="card-top-bar" />
       <div className="card-body">
@@ -177,8 +201,18 @@ function CourseCard({ course, onClick }) {
           <FileText size={13} aria-hidden="true" />
           {course.syllabus_count} syllabus
         </span>
-        <span className={`card-status ${hasReport ? "card-status--done" : ""}`}>
-          {hasReport ? "Analizado" : "Pendiente"}
+        <span
+          className={`card-status ${isClean ? "card-status--done" : ""} ${
+            hasInconsistencies ? "card-status--warning" : ""
+          } ${status === "failed" ? "card-status--error" : ""} ${
+            isProcessing ? "card-status--active" : ""
+          }`}
+        >
+          {isProcessing && <Loader2 className="spin" size={14} aria-hidden="true" />}
+          {hasInconsistencies && <AlertTriangle size={14} aria-hidden="true" />}
+          {isClean && <CircleCheck size={14} aria-hidden="true" />}
+          {status === "failed" && <AlertTriangle size={14} aria-hidden="true" />}
+          {statusLabel}
         </span>
       </div>
     </button>

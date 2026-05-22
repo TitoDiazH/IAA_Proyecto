@@ -38,6 +38,7 @@ class CourseListItem(BaseModel):
     syllabus_count: int
     latest_report_id: int | None = None
     latest_report_status: str | None = None
+    latest_report_inconsistency_count: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,6 +53,7 @@ class CourseDetail(BaseModel):
     course_name: str
     syllabi: list[SyllabusRead]
     latest_report_id: int | None = None
+    latest_report_status: str | None = None
 
 
 class InconsistencyRead(BaseModel):
@@ -86,5 +88,5 @@ class UploadResponse(BaseModel):
     rejected_count: int
     rejected_files: list[RejectedFile]
     course_ids: list[int]
+    queued_report_ids: list[int] = []
     message: str
-

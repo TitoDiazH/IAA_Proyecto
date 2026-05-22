@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import CourseGroup, Syllabus
+from app.services.analysis_queue import enqueue_report_analysis
 from app.services.filename_parser import FilenameParseError, parse_syllabus_filename, slugify_filename
 from app.services.pdf_extractor import extract_pdf_text
+from app.services.report_service import create_queued_analysis_report
 
 
 def _get_or_create_course_group(db: Session, parsed) -> CourseGroup:
@@ -55,6 +57,7 @@ def process_zip_upload(db: Session, filename: str, content: bytes) -> dict:
     accepted = 0
     rejected: list[dict[str, str]] = []
     course_ids: set[int] = set()
+    queued_report_ids: list[int] = []
 
     try:
         archive = ZipFile(BytesIO(content))
@@ -123,11 +126,19 @@ def process_zip_upload(db: Session, filename: str, content: bytes) -> dict:
             course_ids.add(group.id)
             accepted += 1
 
+    for course_id in sorted(course_ids):
+        report = create_queued_analysis_report(db, course_id)
+        queued_report_ids.append(report.id)
+
     db.commit()
+    for report_id in queued_report_ids:
+        enqueue_report_analysis(report_id)
+
     return {
         "accepted_count": accepted,
         "rejected_count": len(rejected),
         "rejected_files": rejected,
         "course_ids": sorted(course_ids),
-        "message": f"Se cargaron {accepted} syllabus PDF",
+        "queued_report_ids": queued_report_ids,
+        "message": f"Se cargaron {accepted} syllabus PDF y se encolaron {len(queued_report_ids)} análisis",
     }

@@ -6,11 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import init_db
 from app.routers import courses, reports, uploads
+from app.services.analysis_queue import start_analysis_worker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    start_analysis_worker()
     yield
 
 
@@ -33,4 +35,3 @@ app.include_router(reports.router)
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-

@@ -45,7 +45,7 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [loadingCourses, setLoadingCourses] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [error, setError] = useState(null);
 
   async function refreshCourses() {
@@ -102,17 +102,19 @@ export default function App() {
 
   async function handleAnalyze() {
     if (!activeCourse) return;
-    setAnalyzing(true);
+
+    setRetryingAnalysis(true);
     setError(null);
     try {
-      const result = await analyzeCourse(activeCourse.id);
-      setReport(result);
-      const updated = await getCourse(activeCourse.id);
-      setActiveCourse(updated);
+      const queuedReport = await analyzeCourse(activeCourse.id);
+      const updatedCourse = await getCourse(activeCourse.id);
+      setReport(queuedReport);
+      setActiveCourse(updatedCourse);
+      refreshCourses();
     } catch (exc) {
       setError(exc.message);
     } finally {
-      setAnalyzing(false);
+      setRetryingAnalysis(false);
     }
   }
 
@@ -143,6 +145,38 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  useEffect(() => {
+    const hasActiveAnalysis = courses.some((course) =>
+      ["queued", "processing"].includes(course.latest_report_status)
+    );
+    if (!hasActiveAnalysis) return undefined;
+
+    const interval = window.setInterval(refreshCourses, 5000);
+    return () => window.clearInterval(interval);
+  }, [courses]);
+
+  useEffect(() => {
+    if (route.view !== "course" || !activeCourse) return undefined;
+
+    const status = report?.status || activeCourse.latest_report_status;
+    if (!["queued", "processing"].includes(status)) return undefined;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const [updatedCourse, latestReport] = await Promise.all([
+          getCourse(activeCourse.id),
+          getLatestReport(activeCourse.id),
+        ]);
+        setActiveCourse(updatedCourse);
+        setReport(latestReport);
+      } catch (exc) {
+        setError(exc.message);
+      }
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [activeCourse, report?.status, route.view]);
+
   return (
     <div className="app-shell">
       {error && (
@@ -162,8 +196,8 @@ export default function App() {
         <Course
           course={activeCourse}
           report={report}
-          analyzing={analyzing}
           loading={loadingDetail}
+          retryingAnalysis={retryingAnalysis}
           onBack={goHome}
           onAnalyze={handleAnalyze}
         />

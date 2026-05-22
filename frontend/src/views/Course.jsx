@@ -7,8 +7,8 @@ import {
   ExternalLink,
   FileText,
   Loader2,
-  PlayCircle,
   Quote,
+  RefreshCcw,
 } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -869,13 +869,32 @@ function SyllabusPdfViewer({
 // ═══════════════════════════════════════════════════════════════════════════════
 // DETAIL VIEW
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function Course({ course, report, analyzing, loading, onBack, onAnalyze }) {
+function analysisStatusLabel(status) {
+  if (status === "completed") return "Analizado";
+  if (status === "queued") return "En cola";
+  if (status === "processing") return "Analizando";
+  if (status === "failed") return "Error";
+  return "Pendiente";
+}
+
+export default function Course({
+  course,
+  report,
+  loading,
+  retryingAnalysis,
+  onBack,
+  onAnalyze,
+}) {
   const color = course ? courseColor(course.id) : PALETTE[0];
   const syllabi = course?.syllabi ?? [];
   const [activeSyllabusIndex, setActiveSyllabusIndex] = useState(0);
   const [quoteJumpTarget, setQuoteJumpTarget] = useState(null);
   const viewerRef = useRef(null);
   const reportHighlights = useMemo(() => collectReportHighlights(report), [report]);
+  const analysisStatus = report?.status || course?.latest_report_status;
+  const analysisIsActive = ["queued", "processing"].includes(analysisStatus);
+  const analysisFailed = analysisStatus === "failed";
+  const reportIsReady = report?.status === "completed";
 
   const centerPdfViewer = useCallback((behavior = "smooth") => {
     const viewerElement = viewerRef.current;
@@ -969,18 +988,10 @@ export default function Course({ course, report, analyzing, loading, onBack, onA
               <p className="detail-name">{course.course_code}</p>
             </div>
             <div className="detail-actions">
-              <button
-                className="primary-button"
-                onClick={onAnalyze}
-                disabled={analyzing}
-              >
-                {analyzing ? (
-                  <Loader2 className="spin" size={18} />
-                ) : (
-                  <PlayCircle size={18} />
-                )}
-                {analyzing ? "Analizando…" : "Analizar"}
-              </button>
+              <span className={`analysis-status analysis-status--${analysisStatus || "pending"}`}>
+                {analysisIsActive && <Loader2 className="spin" size={16} />}
+                {analysisStatusLabel(analysisStatus)}
+              </span>
             </div>
           </div>
 
@@ -994,23 +1005,43 @@ export default function Course({ course, report, analyzing, loading, onBack, onA
               />
 
               <div className="detail-analysis">
-                {analyzing ? (
+                {analysisIsActive ? (
                   <div className="analyzing-state">
                     <Loader2 className="spin" size={26} />
                     <p>
-                      Analizando syllabus con IA local…
+                      {analysisStatus === "queued"
+                        ? "El análisis está en cola…"
+                        : "Analizando syllabus con IA…"}
                       <br />
                       <small>Esto puede tardar unos minutos.</small>
                     </p>
                   </div>
-                ) : report ? (
+                ) : reportIsReady ? (
                   <ReportView report={report} onEvidenceSelect={handleEvidenceSelect} />
+                ) : analysisFailed ? (
+                  <div className="no-report-state">
+                    <AlertTriangle size={32} aria-hidden="true" />
+                    <p>{report?.summary?.message || "El análisis falló."}</p>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={onAnalyze}
+                      disabled={retryingAnalysis}
+                    >
+                      {retryingAnalysis ? (
+                        <Loader2 className="spin" size={18} />
+                      ) : (
+                        <RefreshCcw size={18} />
+                      )}
+                      {retryingAnalysis ? "Encolando…" : "Reintentar análisis"}
+                    </button>
+                  </div>
                 ) : (
                   <div className="no-report-state">
-                    <PlayCircle size={32} aria-hidden="true" />
+                    <FileText size={32} aria-hidden="true" />
                     <p>
-                      Presiona <strong>Analizar</strong> para comparar los syllabus de este
-                      curso.
+                      El análisis se iniciará automáticamente cuando subas un ZIP con
+                      syllabus para este curso.
                     </p>
                   </div>
                 )}

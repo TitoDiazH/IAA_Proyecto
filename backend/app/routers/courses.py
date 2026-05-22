@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.models import AnalysisReport, CourseGroup, Syllabus
 from app.schemas import CourseDetail, CourseListItem, ReportRead, SyllabusRead
-from app.services.ai_client import AIConfigurationError, AIProviderError
+from app.services.analysis_queue import enqueue_report_analysis
 from app.services.filename_parser import normalize_course_name
-from app.services.report_service import analyze_course
+from app.services.report_service import create_queued_analysis_report
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -25,7 +25,10 @@ def _latest_report(group: CourseGroup) -> AnalysisReport | None:
 def list_courses(db: Session = Depends(get_db)) -> list[CourseListItem]:
     groups = (
         db.query(CourseGroup)
-        .options(selectinload(CourseGroup.syllabi), selectinload(CourseGroup.reports))
+        .options(
+            selectinload(CourseGroup.syllabi),
+            selectinload(CourseGroup.reports).selectinload(AnalysisReport.inconsistencies),
+        )
         .order_by(CourseGroup.academic_period.desc(), CourseGroup.course_code.asc())
         .all()
     )
@@ -44,6 +47,9 @@ def list_courses(db: Session = Depends(get_db)) -> list[CourseListItem]:
                 syllabus_count=len(group.syllabi),
                 latest_report_id=latest.id if latest else None,
                 latest_report_status=latest.status if latest else None,
+                latest_report_inconsistency_count=(
+                    len(latest.inconsistencies) if latest and latest.status == "completed" else None
+                ),
                 created_at=group.created_at,
                 updated_at=group.updated_at,
             )
@@ -74,19 +80,19 @@ def get_course(course_id: int, db: Session = Depends(get_db)) -> CourseDetail:
         course_name=normalize_course_name(group.course_name),
         syllabi=[SyllabusRead.model_validate(syllabus) for syllabus in syllabi],
         latest_report_id=latest.id if latest else None,
+        latest_report_status=latest.status if latest else None,
     )
 
 
 @router.post("/{course_id}/analyze", response_model=ReportRead)
 def analyze_course_endpoint(course_id: int, db: Session = Depends(get_db)) -> AnalysisReport:
     try:
-        report = analyze_course(db, course_id)
+        report = create_queued_analysis_report(db, course_id)
+        db.commit()
+        db.refresh(report)
+        enqueue_report_analysis(report.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except AIConfigurationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except AIProviderError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return report
 
 

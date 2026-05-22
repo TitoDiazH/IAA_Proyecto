@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_upload_mb: int = 100
     ai_request_timeout_seconds: int = 300
+    analysis_retry_delay_seconds: int = 30
+    analysis_max_retries: int = 3
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
