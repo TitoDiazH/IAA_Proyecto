@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from io import StringIO
-from re import IGNORECASE, search, split
+from re import IGNORECASE, search, split, sub
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 from io import BytesIO
@@ -116,15 +116,21 @@ def _build_row(group: CourseGroup, nrc: str, normalized: Any) -> list[str]:
     requirements = _clean(export_fields.get("requisitos_aprobacion")) or _summarize_requirements(
         normalized.get("requisitos_aprobacion")
     )
-    exemption = _clean(export_fields.get("requisitos_exencion")) or _summarize_exemption(
-        normalized.get("criterios_eximicion")
-    )
+    exemption = _clean(
+        export_fields.get("requisitos_eximicion") or export_fields.get("requisitos_exencion")
+    ) or _summarize_exemption(normalized.get("criterios_eximicion"))
     final_grade = _clean(normalized.get("nota_final"))
-    final_formula = _clean(export_fields.get("nota_final"))
-    failed_rules = _clean(export_fields.get("nota_final_reprobados"))
+    final_formula = _clean(export_fields.get("formula_nota_final") or export_fields.get("nota_final"))
+    failed_rules = _clean(export_fields.get("nota_final_reprobacion") or export_fields.get("nota_final_reprobados"))
     other_criteria = _clean(export_fields.get("otros_criterios"))
+    # Normalizar comas decimales en fórmulas (p. ej. '0,7' -> '0.7')
+    final_formula = _normalize_formula_decimals(final_formula)
+    failed_rules = _normalize_formula_decimals(failed_rules)
+    other_criteria = _normalize_formula_decimals(other_criteria)
     if not final_formula and not failed_rules and not other_criteria:
         final_formula, failed_rules, other_criteria = _split_final_grade(final_grade)
+    if not final_formula:
+        final_formula = "No especificado"
 
     return [
         normalize_course_name(group.course_name),
@@ -222,7 +228,7 @@ def _split_final_grade(text: str) -> tuple[str, str, str]:
     if not text:
         return "", "", ""
 
-    parts = [part.strip(" .;") for part in split(r"\s*[•\n]\s*", text) if part.strip(" .;")]
+    parts = _split_sentences_preserving_decimals(text)
     formulas = _extract_nf_formulas(text)
     failed_parts = [
         _compact_condition(part)
@@ -239,17 +245,33 @@ def _split_final_grade(text: str) -> tuple[str, str, str]:
         and not (part.lower().startswith("si ") and "nf" in part.lower())
     ]
 
-    formula = formulas[0] if formulas else text
+    # If we found an explicit NF formula, use it. Otherwise avoid returning
+    # the full paragraph as the formula (that causes long text to appear in the
+    # "NOTA FINAL" column). Keep the original text in `other_parts` so it is
+    # still available in "Otros Criterios" when needed.
+    formula = formulas[0] if formulas else ""
+    if not formula and text and text not in other_parts:
+        other_parts.insert(0, text)
+
     return formula, "; ".join(failed_parts), "; ".join(other_parts)
+
+
+def _normalize_formula_decimals(text: str) -> str:
+    """Convertir comas decimales tipo '0,7' a '0.7' dentro de fórmulas/fragmentos.
+
+    Solo reemplaza comas que estén entre dígitos para evitar tocar texto normal.
+    """
+    if not text:
+        return text
+    return sub_decimal_commas(text)
 
 
 def _extract_nf_formulas(text: str) -> list[str]:
     formulas = []
-    for match in split(r"\s*[•\n]\s*", text):
-        formula_match = search(r"NF\s*=\s*[^;•\n]+", match, flags=IGNORECASE)
-        if not formula_match:
+    for match in _split_sentences_preserving_decimals(text):
+        if not search(r"(?:\bNF\s*=|nota\s+final\s*=)", match, flags=IGNORECASE):
             continue
-        formula = _clean(formula_match.group(0).strip(" .;:"))
+        formula = _clean(match.strip(" .;:"))
         if formula and formula not in formulas:
             formulas.append(formula)
     weighted = [
@@ -259,6 +281,17 @@ def _extract_nf_formulas(text: str) -> list[str]:
         and any(token in formula for token in ["+", "*", "0."])
     ]
     return weighted or formulas
+
+
+def _split_sentences_preserving_decimals(text: str) -> list[str]:
+    if not text:
+        return []
+    parts = split(r"\s*(?:[•\n]+|(?<!\d)\.(?!\d))\s*", text)
+    return [part.strip(" .;") for part in parts if part.strip(" .;")]
+
+
+def sub_decimal_commas(text: str) -> str:
+    return sub(r"(?<=\d),(?=\d)", ".", text)
 
 
 def _compact_condition(text: str) -> str:

@@ -258,7 +258,10 @@ a {
 }
 
 .spin {
+  display: inline-block;
   animation: spin 900ms linear infinite;
+  transform-origin: center center;
+  transform-box: fill-box;
 }
 
 @keyframes spin {

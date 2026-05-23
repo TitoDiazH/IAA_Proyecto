@@ -65,10 +65,14 @@ def test_build_conditions_export_table_uses_completed_report_normalized_data():
                         "nota_final": "NF = 0.70 NP + 0.30 NE. Si NE<3, NF=min(3.9; NF).",
                         "conditions_export": {
                             "requisitos_aprobacion": "NP>=3; NE>=3; NF>=4",
-                            "requisitos_exencion": "-",
-                            "nota_final": "NF=0.7NP+0.3NE",
-                            "nota_final_reprobados": "Si NE<3 -> NF=min(3.9,NF)",
+                            "requisitos_eximicion": "-",
+                            "formula_nota_final": "NF=0.7NP+0.3NE",
+                            "nota_final_reprobacion": "Si NE<3 -> NF=min(3.9,NF)",
                             "otros_criterios": "",
+                            "evidencia_textual": [
+                                {"campo": "formula_nota_final", "fragmento": "NF = 0.70 NP + 0.30 NE"}
+                            ],
+                            "confianza_extraccion": 0.95,
                         },
                     }
                 }
@@ -96,6 +100,9 @@ def test_build_conditions_export_table_uses_completed_report_normalized_data():
         "NF=0.7NP+0.3NE",
         "Si NE<3 -> NF=min(3.9,NF)",
     ]
+    assert "Evidencia Textual" not in table["columns"]
+    assert "Confianza Extracción" not in table["columns"]
+    assert len(table["rows"][0]) == len(table["columns"]) == 19
 
 
 def test_conditions_table_to_xlsx_returns_openxml_zip():
@@ -110,3 +117,58 @@ def test_conditions_table_to_xlsx_returns_openxml_zip():
     with ZipFile(BytesIO(payload)) as archive:
         assert "xl/workbook.xml" in archive.namelist()
         assert "xl/worksheets/sheet1.xml" in archive.namelist()
+
+
+def test_conditions_export_fallback_does_not_break_decimal_formula():
+    db = make_session()
+    course = CourseGroup(
+        academic_period="202610",
+        year=2026,
+        term="10",
+        course_code="ING1108",
+        career="ING",
+        course_name="Introduccion al Calculo",
+    )
+    db.add(course)
+    db.flush()
+    db.add(
+        Syllabus(
+            course_group_id=course.id,
+            original_filename="202610-ING-ING1108-NRC-7579-INTRODUCCION-AL-CALCULO.pdf",
+            stored_path="/tmp/syllabus.pdf",
+            file_size=100,
+            academic_period="202610",
+            year=2026,
+            term="10",
+            career="ING",
+            course_code="ING1108",
+            nrc="7579",
+            course_name="Introduccion al Calculo",
+            text_content="",
+            extraction_status="ok",
+        )
+    )
+    db.add(
+        AnalysisReport(
+            course_group_id=course.id,
+            status="completed",
+            compared_nrcs=["7579"],
+            summary={
+                "normalized_syllabi_by_nrc": {
+                    "7579": {
+                        "evaluaciones": [],
+                        "requisitos_aprobacion": "",
+                        "criterios_eximicion": "",
+                        "nota_final": "NF = 0.7 NP + 0.3 EX. Si EX < 3.0 reprueba.",
+                    }
+                }
+            },
+            processing_time_seconds=1,
+        )
+    )
+    db.commit()
+
+    table = build_conditions_export_table(db)
+
+    assert table["rows"][0][16] == "NF = 0.7 NP + 0.3 EX"
+    assert table["rows"][0][16] != "NF = 0"

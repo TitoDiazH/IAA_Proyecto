@@ -44,11 +44,11 @@ def _rango_seccion_en_texto(
     titulo_seccion: str,
     siguientes_secciones: str | list[str] | None = None,
 ) -> tuple[int, int] | None:
-    start_title = texto_completo.find(titulo_seccion)
-    if start_title == -1:
+    start_match = re.search(_section_title_pattern(titulo_seccion), texto_completo, flags=re.IGNORECASE)
+    if start_match is None:
         return None
 
-    start = start_title + len(titulo_seccion)
+    start = start_match.end()
     siguientes = []
     if isinstance(siguientes_secciones, str):
         siguientes = [siguientes_secciones]
@@ -56,12 +56,16 @@ def _rango_seccion_en_texto(
         siguientes = siguientes_secciones
 
     end_candidates = [
-        index
+        match.start()
         for siguiente in siguientes
-        if (index := texto_completo.find(siguiente, start)) != -1
+        if (match := re.search(_section_title_pattern(siguiente), texto_completo[start:], flags=re.IGNORECASE))
     ]
-    end = min(end_candidates) if end_candidates else len(texto_completo)
+    end = start + min(end_candidates) if end_candidates else len(texto_completo)
     return start, end
+
+
+def _section_title_pattern(title: str) -> str:
+    return r"\s+".join(re.escape(part) for part in title.split())
 
 
 def _paginas_en_rango_seccion(

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     ai_request_timeout_seconds: int = 300
     analysis_retry_delay_seconds: int = 30
     analysis_max_retries: int = 3
+    conditions_export_max_workers: int = 4
+    conditions_export_batch_max_syllabi: int = 3
+    conditions_export_batch_max_chars: int = 12000
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
 
