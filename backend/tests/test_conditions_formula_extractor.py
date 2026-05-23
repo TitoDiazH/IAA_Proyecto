@@ -1,4 +1,7 @@
-from app.services.conditions_formula_extractor import enrich_syllabi_with_conditions_export
+from app.services.conditions_formula_extractor import (
+    _normalize_conditions_result,
+    enrich_syllabi_with_conditions_export,
+)
 
 
 class FakeClient:
@@ -10,9 +13,9 @@ class FakeClient:
         return {
             "nrc": "7579",
             "requisitos_aprobacion": "NF >= 4.0",
-            "requisitos_eximicion": None,
+            "requisitos_exencion": None,
             "formula_nota_final": "NF = 0.7 NP + 0.3 EX. Si EX < 3.0 reprueba.",
-            "nota_final_reprobacion": "Si EX < 3.0 -> reprueba",
+            "nota_final_reprobados": "Si EX < 3.0 -> reprueba",
             "otros_criterios": None,
             "evidencia_textual": [
                 {"campo": "formula_nota_final", "fragmento": "NF = 0.7 NP + 0.3 EX"}
@@ -38,22 +41,23 @@ def test_conditions_formula_extractor_preserves_decimal_formula(monkeypatch):
         )(),
     )
 
+    client = FakeClient()
     result = enrich_syllabi_with_conditions_export(
         {
             "7579": {
                 "evaluaciones": [],
                 "requisitos_aprobacion": "",
-                "criterios_eximicion": "",
                 "nota_final": "NF = 0.7 NP + 0.3 EX",
             }
         },
-        FakeClient(),
+        client,
     )
 
     export = result["7579"]["conditions_export"]
     assert export["formula_nota_final"] == "NF = 0.7 NP + 0.3 EX"
-    assert export["nota_final"] == "NF = 0.7 NP + 0.3 EX"
+    assert export["nota_final_reprobados"] == "Si EX < 3.0 -> reprueba"
     assert export["formula_nota_final"] != "NF = 0"
+    assert "criterios_eximicion" not in client.calls[0]["user_prompt"]
 
 
 class FakeBatchClient:
@@ -67,9 +71,9 @@ class FakeBatchClient:
                 {
                     "nrc": "7579",
                     "requisitos_aprobacion": "NF >= 4.0",
-                    "requisitos_eximicion": None,
+                    "requisitos_exencion": None,
                     "formula_nota_final": "NF = 0.7 NP + 0.3 EX",
-                    "nota_final_reprobacion": None,
+                    "nota_final_reprobados": None,
                     "otros_criterios": None,
                     "evidencia_textual": [
                         {"campo": "formula_nota_final", "fragmento": "NF = 0.7 NP + 0.3 EX"}
@@ -80,9 +84,9 @@ class FakeBatchClient:
                 {
                     "nrc": "7580",
                     "requisitos_aprobacion": "NF >= 4.0",
-                    "requisitos_eximicion": "NP >= 5.5",
+                    "requisitos_exencion": "NP >= 5.5",
                     "formula_nota_final": "NF = 0.6 NP + 0.4 EX",
-                    "nota_final_reprobacion": "Si EX < 3.0 -> NF = 3.9",
+                    "nota_final_reprobados": "Si EX < 3.0 -> NF = 3.9",
                     "otros_criterios": None,
                     "evidencia_textual": [
                         {"campo": "formula_nota_final", "fragmento": "NF = 0.6 NP + 0.4 EX"}
@@ -116,13 +120,11 @@ def test_conditions_formula_extractor_uses_batch_for_small_payloads(monkeypatch)
             "7579": {
                 "evaluaciones": [],
                 "requisitos_aprobacion": "",
-                "criterios_eximicion": "",
                 "nota_final": "NF = 0.7 NP + 0.3 EX",
             },
             "7580": {
                 "evaluaciones": [],
                 "requisitos_aprobacion": "",
-                "criterios_eximicion": "",
                 "nota_final": "NF = 0.6 NP + 0.4 EX",
             },
         },
@@ -130,5 +132,46 @@ def test_conditions_formula_extractor_uses_batch_for_small_payloads(monkeypatch)
     )
 
     assert [call["schema_name"] for call in client.calls] == ["conditions_export_batch"]
+    assert "criterios_eximicion" not in client.calls[0]["user_prompt"]
     assert result["7579"]["conditions_export"]["formula_nota_final"] == "NF = 0.7 NP + 0.3 EX"
     assert result["7580"]["conditions_export"]["formula_nota_final"] == "NF = 0.6 NP + 0.4 EX"
+
+
+def test_conditions_formula_extractor_accepts_explicit_weighted_text():
+    export = _normalize_conditions_result(
+        "7579",
+        {
+            "nrc": "7579",
+            "requisitos_aprobacion": None,
+            "requisitos_exencion": None,
+            "formula_nota_final": "La nota final se calcula con 70% NP y 30% EX",
+            "nota_final_reprobados": None,
+            "otros_criterios": None,
+            "evidencia_textual": [
+                {"campo": "formula_nota_final", "fragmento": "70% NP y 30% EX"}
+            ],
+            "confianza_extraccion": 0.8,
+            "advertencias": [],
+        },
+    )
+
+    assert export["formula_nota_final"] == "NF = 0.7*NP + 0.3*EX"
+
+
+def test_conditions_formula_extractor_drops_placeholder_formula():
+    export = _normalize_conditions_result(
+        "7579",
+        {
+            "nrc": "7579",
+            "requisitos_aprobacion": None,
+            "requisitos_exencion": None,
+            "formula_nota_final": "NF = 0",
+            "nota_final_reprobados": None,
+            "otros_criterios": None,
+            "evidencia_textual": [],
+            "confianza_extraccion": 0.5,
+            "advertencias": [],
+        },
+    )
+
+    assert export["formula_nota_final"] is None

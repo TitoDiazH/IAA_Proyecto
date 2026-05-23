@@ -30,17 +30,16 @@ def main():
         normalized[nrc] = {
             "evaluaciones": [],
             "requisitos_aprobacion": "",
-            "criterios_eximicion": "",
             "nota_final": text,
         }
 
     # Case A: AI returns empty fields -> should use our split logic (no long paragraph in nota_final)
-    rows_a = [{"nrc": n, "requisitos_aprobacion": "", "requisitos_exencion": "", "nota_final": "", "nota_final_reprobados": "", "otros_criterios": ""} for n in normalized.keys()]
+    rows_a = [{"nrc": n, "requisitos_aprobacion": "", "requisitos_exencion": "", "formula_nota_final": "", "nota_final_reprobados": "", "otros_criterios": ""} for n in normalized.keys()]
     client_a = FakeClient(rows_a)
     result_a = enrich_syllabi_with_conditions_export(normalized.copy(), client_a)
 
-    # Case B: AI returns full paragraph mistakenly in nota_final -> before fix would appear in NOTA FINAL
-    rows_b = [{"nrc": n, "requisitos_aprobacion": "", "requisitos_exencion": "", "nota_final": normalized[n]["nota_final"], "nota_final_reprobados": "", "otros_criterios": ""} for n in normalized.keys()]
+    # Case B: AI returns full paragraph mistakenly in formula_nota_final -> should be normalized.
+    rows_b = [{"nrc": n, "requisitos_aprobacion": "", "requisitos_exencion": "", "formula_nota_final": normalized[n]["nota_final"], "nota_final_reprobados": "", "otros_criterios": ""} for n in normalized.keys()]
     client_b = FakeClient(rows_b)
     result_b = enrich_syllabi_with_conditions_export(normalized.copy(), client_b)
 

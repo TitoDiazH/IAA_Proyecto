@@ -37,9 +37,9 @@ class FakeAIClient:
                     {
                         "nrc": "7542",
                         "requisitos_aprobacion": "NF>=4",
-                        "requisitos_eximicion": "NP>=5.5",
+                        "requisitos_exencion": "NP>=5.5",
                         "formula_nota_final": "NF=0.7NP+0.3EX",
-                        "nota_final_reprobacion": "Si NP<3 -> NF=NP",
+                        "nota_final_reprobados": "Si NP<3 -> NF=NP",
                         "otros_criterios": None,
                         "evidencia_textual": [
                             {"campo": "formula_nota_final", "fragmento": "NF = 0.7 NP + 0.3 EX"}
@@ -50,9 +50,9 @@ class FakeAIClient:
                     {
                         "nrc": "7543",
                         "requisitos_aprobacion": "NF>=4",
-                        "requisitos_eximicion": "NP>=5.8",
+                        "requisitos_exencion": "NP>=5.8",
                         "formula_nota_final": "NF=0.7NP+0.3EX",
-                        "nota_final_reprobacion": "Si NP<3 -> NF=NP",
+                        "nota_final_reprobados": "Si NP<3 -> NF=NP",
                         "otros_criterios": None,
                         "evidencia_textual": [
                             {"campo": "formula_nota_final", "fragmento": "NF = 0.7 NP + 0.3 EX"}
@@ -69,9 +69,9 @@ class FakeAIClient:
             return {
                 "nrc": nrc,
                 "requisitos_aprobacion": "NF>=4",
-                "requisitos_eximicion": f"NP>={threshold}",
+                "requisitos_exencion": f"NP>={threshold}",
                 "formula_nota_final": "NF=0.7NP+0.3EX",
-                "nota_final_reprobacion": "Si NP<3 -> NF=NP",
+                "nota_final_reprobados": "Si NP<3 -> NF=NP",
                 "otros_criterios": None,
                 "evidencia_textual": [
                     {"campo": "formula_nota_final", "fragmento": "NF = 0.7 NP + 0.3 EX"}
@@ -96,7 +96,7 @@ class FakeAIClient:
             },
             "inconsistencies": [
                 {
-                    "section": "criterios_eximicion",
+                    "section": "requisitos_aprobacion",
                     "variable": "threshold",
                     "severity": "critica",
                     "description": "Un NRC exige 5.8 y otro 5.5.",
@@ -158,16 +158,6 @@ def test_ai_analyzer_uses_code_extraction_and_one_global_ai_comparison(monkeypat
                         "attendance_rules": [],
                     },
                 },
-                "criterios_eximicion": {
-                    "found": True,
-                    "page_numbers": [8],
-                    "raw_evidence": f"Promedio igual o superior a {threshold}",
-                    "structured_data": {
-                        "is_available": True,
-                        "threshold": threshold,
-                        "conditions": [f"Promedio igual o superior a {threshold}"],
-                    },
-                },
                 "nota_final": {
                     "found": True,
                     "page_numbers": [9],
@@ -199,8 +189,7 @@ Pruebas 30
 --- Página 8 ---
 Requisitos de Aprobación
 Nota mínima 4.0
-Criterios de Eximición
-Promedio igual o superior a 5,5
+Se puede eximir con promedio igual o superior a 5,5
 --- Página 9 ---
 Nota Final de la Asignatura
 NF = 0.7 NP + 0.3 EX
@@ -218,8 +207,7 @@ Pruebas 30
 --- Página 8 ---
 Requisitos de Aprobación
 Nota mínima 4.0
-Criterios de Eximición
-Promedio igual o superior a 5,8
+Se puede eximir con promedio igual o superior a 5,8
 --- Página 9 ---
 Nota Final de la Asignatura
 NF = 0.7 NP + 0.3 EX
@@ -245,7 +233,7 @@ NF = 0.7 NP + 0.3 EX
     assert len(extraction_calls) == 0
     assert len(export_calls) == 1
     assert len(comparison_calls) == 1
-    assert result["normalized_syllabi_by_nrc"]["7542"]["conditions_export"]["nota_final"] == "NF=0.7NP+0.3EX"
+    assert result["normalized_syllabi_by_nrc"]["7542"]["conditions_export"]["formula_nota_final"] == "NF=0.7NP+0.3EX"
     assert result["summary"]["course"]["course_code"] == "2207"
     assert result["summary"]["severity_counts"]["Crítica"] == 1
     assert result["summary"]["possible_outlier"]["nrc"] == "7543"

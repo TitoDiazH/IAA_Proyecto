@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from io import StringIO
-from re import IGNORECASE, search, split, sub
+from re import IGNORECASE, findall, search, split, sub
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 from io import BytesIO
@@ -117,18 +117,25 @@ def _build_row(group: CourseGroup, nrc: str, normalized: Any) -> list[str]:
         normalized.get("requisitos_aprobacion")
     )
     exemption = _clean(
-        export_fields.get("requisitos_eximicion") or export_fields.get("requisitos_exencion")
-    ) or _summarize_exemption(normalized.get("criterios_eximicion"))
+        export_fields.get("requisitos_exencion") or export_fields.get("requisitos_eximicion")
+    ) or _summarize_exemption_from_sections(
+        normalized.get("requisitos_aprobacion"),
+        normalized.get("nota_final"),
+    )
     final_grade = _clean(normalized.get("nota_final"))
     final_formula = _clean(export_fields.get("formula_nota_final") or export_fields.get("nota_final"))
-    failed_rules = _clean(export_fields.get("nota_final_reprobacion") or export_fields.get("nota_final_reprobados"))
+    failed_rules = _clean(export_fields.get("nota_final_reprobados") or export_fields.get("nota_final_reprobacion"))
     other_criteria = _clean(export_fields.get("otros_criterios"))
     # Normalizar comas decimales en fórmulas (p. ej. '0,7' -> '0.7')
     final_formula = _normalize_formula_decimals(final_formula)
     failed_rules = _normalize_formula_decimals(failed_rules)
     other_criteria = _normalize_formula_decimals(other_criteria)
+    if _is_placeholder_formula(final_formula):
+        final_formula = ""
     if not final_formula and not failed_rules and not other_criteria:
         final_formula, failed_rules, other_criteria = _split_final_grade(final_grade)
+    if _is_placeholder_formula(final_formula):
+        final_formula = ""
     if not final_formula:
         final_formula = "No especificado"
 
@@ -233,7 +240,7 @@ def _split_final_grade(text: str) -> tuple[str, str, str]:
     failed_parts = [
         _compact_condition(part)
         for part in parts
-        if any(token in part.lower() for token in ["si ", "reprob", "<4", "< 4", "menor"])
+        if _looks_like_failed_final_grade_rule(part)
     ]
     failed_parts = [part for part in failed_parts if part]
     other_parts = [
@@ -269,9 +276,7 @@ def _normalize_formula_decimals(text: str) -> str:
 def _extract_nf_formulas(text: str) -> list[str]:
     formulas = []
     for match in _split_sentences_preserving_decimals(text):
-        if not search(r"(?:\bNF\s*=|nota\s+final\s*=)", match, flags=IGNORECASE):
-            continue
-        formula = _clean(match.strip(" .;:"))
+        formula = _formula_from_explicit_match(match)
         if formula and formula not in formulas:
             formulas.append(formula)
     weighted = [
@@ -281,6 +286,76 @@ def _extract_nf_formulas(text: str) -> list[str]:
         and any(token in formula for token in ["+", "*", "0."])
     ]
     return weighted or formulas
+
+
+def _formula_from_explicit_match(text: str) -> str:
+    clean = _clean(text.strip(" .;:"))
+    if not clean:
+        return ""
+    if search(r"(?:\bNF\s*=|nota\s+final\s*=)", clean, flags=IGNORECASE):
+        formula = _extract_nf_assignment(clean) or clean
+        return "" if _is_placeholder_formula(formula) else formula
+    explicit_formula = _formula_from_explicit_weighted_text(clean)
+    if explicit_formula:
+        return explicit_formula
+    if _looks_like_weighted_expression(clean):
+        return f"NF = {clean}"
+    return ""
+
+
+def _extract_nf_assignment(text: str) -> str:
+    match = search(r"\bNF\s*=", text, flags=IGNORECASE)
+    if not match:
+        return ""
+    return text[match.start():].strip(" .;:")
+
+
+def _formula_from_explicit_weighted_text(text: str) -> str:
+    pairs = search_all_weight_component_pairs(text)
+    if len(pairs) < 2:
+        return ""
+
+    components = []
+    for percent, label in pairs:
+        try:
+            weight = float(percent.replace(",", ".")) / 100
+        except ValueError:
+            return ""
+        if weight <= 0 or weight > 1:
+            return ""
+        components.append(f"{weight:g}*{label.upper()}")
+    return f"NF = {' + '.join(components)}"
+
+
+def search_all_weight_component_pairs(text: str) -> list[tuple[str, str]]:
+    pairs = findall(
+        r"(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:de\s+)?([A-Z]{1,6})\b",
+        text,
+        flags=IGNORECASE,
+    )
+    if len(pairs) >= 2:
+        return pairs
+    return findall(
+        r"(\d+(?:[.,]\d+)?)\s*(?:por\s+ciento|%)\s*(?:de\s+)?(?:la\s+)?(?:nota\s+)?([A-Z]{1,6})\b",
+        text,
+        flags=IGNORECASE,
+    )
+
+
+def _looks_like_weighted_expression(text: str) -> bool:
+    upper = text.upper()
+    has_component = len(set(findall(r"\b(?:NP|NE|EX|NCAT|NL|P\d*|C\d*|T\d*)\b", upper))) >= 2
+    has_weight = bool(search(r"\b0\.\d+\s*\*?\s*[A-Z]", upper) or search(r"\b\d{1,3}\s*%\s*(?:DE\s+)?[A-Z]", upper))
+    has_operator = any(operator in text for operator in ["+", "*"])
+    return has_component and has_weight and has_operator
+
+
+def _looks_like_failed_final_grade_rule(text: str) -> bool:
+    lowered = text.lower()
+    failure_markers = ["reprob", "<", "menor", "inferior", "no cumple", "caso contrario", "en caso contrario"]
+    return any(marker in lowered for marker in failure_markers) and (
+        "nf" in lowered or "nota final" in lowered or "reprueba" in lowered
+    )
 
 
 def _split_sentences_preserving_decimals(text: str) -> list[str]:
@@ -343,6 +418,24 @@ def _summarize_exemption(value: Any) -> str:
         if match:
             return f"NP>={_normalize_number(match.group(1))}"
     return text
+
+
+def _summarize_exemption_from_sections(*values: Any) -> str:
+    for value in values:
+        text = _clean(value)
+        if not text or "exim" not in text.lower():
+            continue
+        summary = _summarize_exemption(text)
+        if summary and summary != "-":
+            return summary
+    return ""
+
+
+def _is_placeholder_formula(value: str) -> bool:
+    if not value:
+        return False
+    compact = sub(r"\s+", "", value).upper()
+    return compact in {"NF=0", "NOTAFINAL=0"}
 
 
 def _normalize_number(value: str) -> str:

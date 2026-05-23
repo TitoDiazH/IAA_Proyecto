@@ -61,13 +61,12 @@ def test_build_conditions_export_table_uses_completed_report_normalized_data():
                             {"tipo": "Examen", "ponderacion": 30, "descripcion": "1 examen"},
                         ],
                         "requisitos_aprobacion": "NP>=3; NE>=3; NF>=4",
-                        "criterios_eximicion": "-",
                         "nota_final": "NF = 0.70 NP + 0.30 NE. Si NE<3, NF=min(3.9; NF).",
                         "conditions_export": {
                             "requisitos_aprobacion": "NP>=3; NE>=3; NF>=4",
-                            "requisitos_eximicion": "-",
+                            "requisitos_exencion": "-",
                             "formula_nota_final": "NF=0.7NP+0.3NE",
-                            "nota_final_reprobacion": "Si NE<3 -> NF=min(3.9,NF)",
+                            "nota_final_reprobados": "Si NE<3 -> NF=min(3.9,NF)",
                             "otros_criterios": "",
                             "evidencia_textual": [
                                 {"campo": "formula_nota_final", "fragmento": "NF = 0.70 NP + 0.30 NE"}
@@ -158,7 +157,6 @@ def test_conditions_export_fallback_does_not_break_decimal_formula():
                     "7579": {
                         "evaluaciones": [],
                         "requisitos_aprobacion": "",
-                        "criterios_eximicion": "",
                         "nota_final": "NF = 0.7 NP + 0.3 EX. Si EX < 3.0 reprueba.",
                     }
                 }

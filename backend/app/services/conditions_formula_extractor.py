@@ -15,18 +15,31 @@ Eres un analista académico experto en extraer condiciones de aprobación desde
 syllabus universitarios.
 
 Debes procesar un único syllabus/NRC por llamada. Usa exclusivamente los
-apartados entregados: evaluaciones, requisitos_aprobacion, criterios_eximicion
-y nota_final. No compares con otros NRC y no inventes reglas ausentes.
+apartados entregados: evaluaciones, requisitos_aprobacion y nota_final.
+No compares con otros NRC y no inventes reglas ausentes.
+
+Los documentos no tienen un apartado independiente llamado "Criterios de
+Eximición". Las reglas de eximición, requisitos para rendir examen, fórmulas
+auxiliares, reglas especiales y otros criterios pueden aparecer dentro de
+requisitos_aprobacion o nota_final. Clasifica cada regla por su significado,
+no por el apartado donde aparece.
 
 Reglas estrictas:
 - Devuelve exclusivamente JSON válido según el esquema.
 - Si una fórmula o condición no aparece de forma explícita, usa null.
 - Nunca uses 0, "NF = 0" ni cadenas vacías como reemplazo de información faltante.
-- Extrae la fórmula de nota final solo si el texto indica cómo calcular NF o la nota final.
+- Extrae la fórmula de nota final solo si el texto indica explícitamente cómo calcular NF
+  o la nota final. Puedes convertir texto explícito como "70% NP y 30% EX" a
+  "NF = 0.7*NP + 0.3*EX", pero solo si porcentajes y componentes aparecen en el texto.
 - Conserva decimales con punto, por ejemplo 0.7, 3.9, 5.5.
-- Diferencia requisitos de aprobación, requisitos de eximición y reglas de cálculo.
-- En nota_final_reprobacion incluye topes o reglas especiales, por ejemplo:
+- Diferencia requisitos de aprobación, requisitos de exención y reglas de cálculo.
+- En requisitos_exencion incluye condiciones para eximirse del examen, aunque aparezcan
+  en requisitos_aprobacion o nota_final.
+- En nota_final_reprobados incluye topes o reglas especiales, por ejemplo:
   "Si EX < 3.0 -> reprueba" o "Si NF calculada >= 4.0 y EX < 3.0 -> NF = 3.9".
+- En otros_criterios incluye reglas relevantes que no sean requisitos de aprobación,
+  exención ni fórmula principal, por ejemplo requisitos para rendir examen o fórmulas
+  auxiliares como NP.
 - En evidencia_textual incluye fragmentos breves y literales que justifiquen cada campo
   extraído. No incluyas evidencia para campos null.
 - confianza_extraccion debe estar entre 0 y 1. Baja la confianza si el texto es ambiguo,
@@ -34,9 +47,9 @@ Reglas estrictas:
 
 Formato de campos:
 - requisitos_aprobacion: condiciones compactas separadas por punto y coma.
-- requisitos_eximicion: condición breve de eximición, o null si no existe o no se especifica.
+- requisitos_exencion: condición breve de exención/eximición, o null si no existe o no se especifica.
 - formula_nota_final: fórmula principal de cálculo, por ejemplo "NF = 0.7 NP + 0.3 EX".
-- nota_final_reprobacion: reglas de reprobación automática o tope de nota.
+- nota_final_reprobados: reglas de reprobación automática o tope de nota.
 - otros_criterios: criterios relevantes que no entren en los campos anteriores.
 
 Ejemplo:
@@ -46,14 +59,14 @@ Salida:
 {
   "nrc": "1234",
   "requisitos_aprobacion": null,
-  "requisitos_eximicion": "NP >= 5.5",
+  "requisitos_exencion": "NP >= 5.5",
   "formula_nota_final": "NF = 0.5 P + 0.2 NC + 0.1 L + 0.2 EX",
-  "nota_final_reprobacion": "Si EX < 3.0 -> reprueba; Si EX < 3.0 y NF calculada >= 4.0 -> NF = 3.9",
+  "nota_final_reprobados": "Si EX < 3.0 -> reprueba; Si EX < 3.0 y NF calculada >= 4.0 -> NF = 3.9",
   "otros_criterios": null,
   "evidencia_textual": [
     {"campo": "formula_nota_final", "fragmento": "NF = 0.5 P + 0.2 NC + 0.1 L + 0.2 EX"},
-    {"campo": "nota_final_reprobacion", "fragmento": "Si EX < 3.0 reprueba"},
-    {"campo": "requisitos_eximicion", "fragmento": "Exime con NP >= 5.5"}
+    {"campo": "nota_final_reprobados", "fragmento": "Si EX < 3.0 reprueba"},
+    {"campo": "requisitos_exencion", "fragmento": "Exime con NP >= 5.5"}
   ],
   "confianza_extraccion": 0.95,
   "advertencias": []
@@ -78,9 +91,9 @@ CONDITIONS_EXPORT_SCHEMA: dict[str, Any] = {
     "properties": {
         "nrc": {"type": "string"},
         "requisitos_aprobacion": {"type": ["string", "null"]},
-        "requisitos_eximicion": {"type": ["string", "null"]},
+        "requisitos_exencion": {"type": ["string", "null"]},
         "formula_nota_final": {"type": ["string", "null"]},
-        "nota_final_reprobacion": {"type": ["string", "null"]},
+        "nota_final_reprobados": {"type": ["string", "null"]},
         "otros_criterios": {"type": ["string", "null"]},
         "evidencia_textual": {
             "type": "array",
@@ -100,9 +113,9 @@ CONDITIONS_EXPORT_SCHEMA: dict[str, Any] = {
     "required": [
         "nrc",
         "requisitos_aprobacion",
-        "requisitos_eximicion",
+        "requisitos_exencion",
         "formula_nota_final",
-        "nota_final_reprobacion",
+        "nota_final_reprobados",
         "otros_criterios",
         "evidencia_textual",
         "confianza_extraccion",
@@ -197,7 +210,6 @@ def _build_payload(nrc: str, syllabus: dict[str, Any]) -> dict[str, Any]:
         "nrc": str(nrc),
         "evaluaciones": syllabus.get("evaluaciones", []),
         "requisitos_aprobacion": syllabus.get("requisitos_aprobacion", ""),
-        "criterios_eximicion": syllabus.get("criterios_eximicion", ""),
         "nota_final": syllabus.get("nota_final", ""),
     }
 
@@ -263,8 +275,12 @@ Syllabus:
 Instrucciones:
 - Busca la fórmula de nota final tanto en `nota_final` como en `requisitos_aprobacion`
   si la sección de nota final está incompleta.
-- Si la fórmula no está explícita, devuelve formula_nota_final = null.
-- Si hay una regla de nota máxima por reprobar un mínimo, colócala en nota_final_reprobacion.
+- La eximición puede estar mencionada dentro de `requisitos_aprobacion` o `nota_final`.
+- Los otros criterios también pueden estar mencionados dentro de esos dos apartados.
+- Clasifica las reglas por significado, no por la sección donde aparecen.
+- Si la fórmula no está explícita o no es convertible desde porcentajes y componentes
+  explícitos, devuelve formula_nota_final = null.
+- Si hay una regla de nota máxima por reprobar un mínimo, colócala en nota_final_reprobados.
 - Incluye evidencia textual breve para cada campo no nulo.
 """.strip()
 
@@ -281,8 +297,12 @@ Instrucciones:
 - Devuelve exactamente un item en `rows` por cada NRC recibido.
 - Busca la fórmula de nota final tanto en `nota_final` como en `requisitos_aprobacion`
   si la sección de nota final está incompleta.
-- Si la fórmula no está explícita, devuelve formula_nota_final = null.
-- Si hay una regla de nota máxima por reprobar un mínimo, colócala en nota_final_reprobacion.
+- La eximición puede estar mencionada dentro de `requisitos_aprobacion` o `nota_final`.
+- Los otros criterios también pueden estar mencionados dentro de esos dos apartados.
+- Clasifica las reglas por significado, no por la sección donde aparecen.
+- Si la fórmula no está explícita o no es convertible desde porcentajes y componentes
+  explícitos, devuelve formula_nota_final = null.
+- Si hay una regla de nota máxima por reprobar un mínimo, colócala en nota_final_reprobados.
 - Incluye evidencia textual breve para cada campo no nulo.
 """.strip()
 
@@ -311,9 +331,9 @@ def _normalize_batch_conditions_result(
 
 def _normalize_conditions_result(nrc: str, result: dict[str, Any]) -> dict[str, Any]:
     formula = _clean_formula_field(result.get("formula_nota_final"))
-    failed_rules = _clean_rule_field(result.get("nota_final_reprobacion"))
+    failed_rules = _clean_rule_field(result.get("nota_final_reprobados") or result.get("nota_final_reprobacion"))
     approval = _clean_nullable_text(result.get("requisitos_aprobacion"))
-    exemption = _clean_nullable_text(result.get("requisitos_eximicion"))
+    exemption = _clean_nullable_text(result.get("requisitos_exencion") or result.get("requisitos_eximicion"))
     other = _clean_nullable_text(result.get("otros_criterios"))
     evidence = _normalize_evidence(result.get("evidencia_textual"))
     warnings = [text for item in result.get("advertencias", []) if (text := _clean_nullable_text(item))]
@@ -322,11 +342,8 @@ def _normalize_conditions_result(nrc: str, result: dict[str, Any]) -> dict[str, 
     return {
         "nrc": str(result.get("nrc") or nrc),
         "requisitos_aprobacion": approval,
-        "requisitos_eximicion": exemption,
         "requisitos_exencion": exemption,
         "formula_nota_final": formula,
-        "nota_final": formula,
-        "nota_final_reprobacion": failed_rules,
         "nota_final_reprobados": failed_rules,
         "otros_criterios": other,
         "evidencia_textual": evidence,
@@ -340,11 +357,8 @@ def _failed_conditions_export(nrc: str, exc: Exception | None) -> dict[str, Any]
     return {
         "nrc": str(nrc),
         "requisitos_aprobacion": None,
-        "requisitos_eximicion": None,
         "requisitos_exencion": None,
         "formula_nota_final": None,
-        "nota_final": None,
-        "nota_final_reprobacion": None,
         "nota_final_reprobados": None,
         "otros_criterios": None,
         "evidencia_textual": [],
@@ -359,6 +373,8 @@ def _clean_formula_field(value: Any) -> str | None:
         return None
 
     formula = _extract_formula_sentence(text)
+    if _is_placeholder_formula(formula):
+        return None
     return formula or None
 
 
@@ -372,12 +388,70 @@ def _clean_rule_field(value: Any) -> str | None:
 def _extract_formula_sentence(text: str) -> str | None:
     for sentence in _split_sentences_preserving_decimals(text):
         if re.search(r"\bNF\s*=", sentence, flags=re.IGNORECASE):
-            return sentence.strip(" .;")
+            return _extract_nf_assignment(sentence) or sentence.strip(" .;")
     for sentence in _split_sentences_preserving_decimals(text):
         lowered = sentence.lower()
         if "=" in sentence and ("nota final" in lowered or "nf" in lowered):
             return sentence.strip(" .;")
+    for sentence in _split_sentences_preserving_decimals(text):
+        formula = _formula_from_explicit_weighted_text(sentence)
+        if formula:
+            return formula
+        expression = sentence.strip(" .;")
+        if _looks_like_weighted_expression(expression):
+            return f"NF = {expression}"
     return None
+
+
+def _extract_nf_assignment(text: str) -> str | None:
+    match = re.search(r"\bNF\s*=", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return text[match.start():].strip(" .;:")
+
+
+def _formula_from_explicit_weighted_text(text: str) -> str | None:
+    pairs = re.findall(
+        r"(\d{1,3}(?:[.,]\d+)?)\s*%\s*(?:de\s+)?([A-Z]{1,6})\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if len(pairs) < 2:
+        pairs = re.findall(
+            r"(\d+(?:[.,]\d+)?)\s*(?:por\s+ciento|%)\s*(?:de\s+)?(?:la\s+)?(?:nota\s+)?([A-Z]{1,6})\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    if len(pairs) < 2:
+        return None
+
+    components = []
+    for percent, label in pairs:
+        try:
+            weight = float(percent.replace(",", ".")) / 100
+        except ValueError:
+            return None
+        if weight <= 0 or weight > 1:
+            return None
+        components.append(f"{weight:g}*{label.upper()}")
+    return f"NF = {' + '.join(components)}"
+
+
+def _looks_like_weighted_expression(text: str) -> bool:
+    if re.search(r"\bNF\s*=", text, flags=re.IGNORECASE):
+        return True
+    upper = text.upper()
+    has_component = len(set(re.findall(r"\b(?:NP|NE|EX|NCAT|NL|P\d*|C\d*|T\d*)\b", upper))) >= 2
+    has_weight = bool(re.search(r"\b0\.\d+\s*\*?\s*[A-Z]", upper) or re.search(r"\b\d{1,3}\s*%\s*(?:DE\s+)?[A-Z]", upper))
+    has_operator = any(operator in text for operator in ["+", "*"])
+    return has_component and has_weight and has_operator
+
+
+def _is_placeholder_formula(value: str | None) -> bool:
+    if not value:
+        return False
+    compact = re.sub(r"\s+", "", value).upper()
+    return compact in {"NF=0", "NOTAFINAL=0"}
 
 
 def _split_sentences_preserving_decimals(text: str) -> list[str]:

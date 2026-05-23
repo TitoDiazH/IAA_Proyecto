@@ -72,3 +72,25 @@ def test_extracts_text_between_sections_across_pages(monkeypatch):
     )
 
     assert text == "Primera parte. Segunda parte de los requisitos."
+
+
+def test_generar_json_syllabus_uses_only_real_condition_sections(monkeypatch):
+    fake_pdf = FakePdf(
+        [
+            FakePage(
+                "Requisitos de Aprobación\n"
+                "Para aprobar se requiere NF >= 4.0. Se puede eximir con NP >= 5.5.\n"
+                "Nota Final de la Asignatura\n"
+                "NF = 0.7 NP + 0.3 EX\n"
+                "Recursos de Aprendizaje - Bibliografía Básica"
+            ),
+        ]
+    )
+    monkeypatch.setattr(syllabus_extractor, "_abrir_pdf", lambda pdf_path: fake_pdf)
+
+    result = syllabus_extractor.generar_json_syllabus("202610-ING-1000-NRC-7579-CURSO.pdf")
+
+    assert set(result) == {"nrc", "evaluaciones", "requisitos_aprobacion", "nota_final"}
+    assert result["nrc"] == "7579"
+    assert "NP >= 5.5" in result["requisitos_aprobacion"]
+    assert result["nota_final"] == "NF = 0.7 NP + 0.3 EX"

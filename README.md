@@ -133,7 +133,6 @@ El MVP analiza estos apartados:
 
 - Evaluaciones y Ponderaciones.
 - Requisitos de Aprobación.
-- Criterios de Eximición.
 - Nota Final de la Asignatura.
 
 Variables intentadas:
