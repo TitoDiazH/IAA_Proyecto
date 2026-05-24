@@ -6,6 +6,7 @@ import unicodedata
 from typing import Any
 
 from app.services.ai_client import AIProviderError, JsonCompletionClient
+from app.services.citation_resolver import build_source_index, resolve_evidence_item
 from app.services.filename_parser import normalize_course_name
 from app.services.syllabus_prompts import (
     SYLLABUS_COMPARISON_SCHEMA,
@@ -80,26 +81,22 @@ def _normalize_severity(value: Any) -> str:
     return "moderada"
 
 
-def _normalize_evidence_items(items: Any) -> list[dict[str, Any]]:
+def _normalize_evidence_items(
+    items: Any,
+    sources_by_nrc: dict[str, list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     normalized_items: list[dict[str, Any]] = []
     if not isinstance(items, list):
         return normalized_items
 
+    source_index = sources_by_nrc or {}
     for item in items:
         if not isinstance(item, dict):
             continue
-        nrc = str(item.get("nrc") or "").strip()
-        if not nrc:
+        resolved = resolve_evidence_item(item, source_index)
+        if resolved is None:
             continue
-        page = item.get("page")
-        try:
-            page_number = int(page) if page is not None else None
-        except (TypeError, ValueError):
-            page_number = None
-        text = _normalize_scalar(item.get("text") or item.get("quote") or item.get("citation"))
-        if text is None:
-            continue
-        normalized_items.append({"nrc": nrc, "page": page_number, "text": text})
+        normalized_items.append(resolved)
     return normalized_items
 
 
@@ -172,6 +169,7 @@ def _normalize_comparison_result(
     normalized_inconsistencies: list[dict[str, Any]] = []
     severity_counts = {"critica": 0, "moderada": 0, "menor": 0}
     outlier_counts: dict[str, int] = defaultdict(int)
+    sources_by_nrc = build_source_index(normalized_syllabi)
 
     for item in raw_inconsistencies:
         if not isinstance(item, dict):
@@ -198,7 +196,7 @@ def _normalize_comparison_result(
         if not outlier_nrcs and majority_value is not None:
             outlier_nrcs = [nrc for nrc, value in values_by_nrc.items() if value is not None and value != majority_value]
 
-        evidence = _normalize_evidence_items(item.get("evidence"))
+        evidence = _normalize_evidence_items(item.get("evidence"), sources_by_nrc)
 
         normalized_item = {
             "section": str(item.get("section") or "Apartado no especificado").strip(),

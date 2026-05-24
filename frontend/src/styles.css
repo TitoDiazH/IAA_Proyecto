@@ -1717,21 +1717,58 @@ a {
   background: #f5fbf7;
 }
 
+.evidence-item-unverified {
+  border-left-color: #c4a15a;
+}
+
 .evidence-item:focus-visible {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: var(--shadow-focus);
 }
 
+.evidence-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+
 .evidence-nrc {
   min-height: 1.5rem;
-  margin-bottom: var(--space-2);
   padding: 0 var(--space-2);
   border-radius: 999px;
   background: #edf4ef;
   color: #23553c;
   font-size: var(--text-xs);
   font-weight: 850;
+}
+
+.evidence-status {
+  min-height: 1.5rem;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: #f0f2f1;
+  color: #5a665f;
+  font-size: var(--text-xs);
+  font-weight: 800;
+}
+
+.evidence-status-verified {
+  background: #e9f6ee;
+  color: #236044;
+}
+
+.evidence-status-approximate,
+.evidence-status-source_resolved {
+  background: #fff5df;
+  color: #76531d;
+}
+
+.evidence-status-unverified {
+  background: #f7efe5;
+  color: #78512d;
 }
 
 .evidence-item p {

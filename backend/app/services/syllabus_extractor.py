@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from app.services.citation_resolver import build_source_entry
+
 try:
     import pdfplumber
 except ImportError:  # pragma: no cover - allows importing this module in minimal test envs
@@ -360,7 +362,7 @@ def extraer_texto_seccion_pdf(
 def extraer_texto_seccion_con_paginas_pdf(
     pdf_path: str,
     titulo_seccion: str,
-    siguiente_seccion: str | None = None,
+    siguiente_seccion: str | list[str] | None = None,
 ) -> tuple[str, list[int]]:
     textos_paginas: list[tuple[int, str]] = []
 
@@ -386,14 +388,34 @@ def extraer_nrc_desde_ruta(pdf_path: str) -> str:
 
 
 def generar_json_syllabus(pdf_path: str) -> dict[str, Any]:
-    requisitos_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_REQUISITOS, SECTION_NOTA_FINAL)
-    nota_final_texto = extraer_texto_seccion_pdf(pdf_path, SECTION_NOTA_FINAL, SECTION_BIBLIOGRAFIA)
+    evaluaciones, evaluaciones_paginas, _ = extraer_evaluaciones_y_ponderaciones_con_pagina_pdf(pdf_path)
+    requisitos_texto, requisitos_paginas = extraer_texto_seccion_con_paginas_pdf(
+        pdf_path,
+        SECTION_REQUISITOS,
+        SECTION_NOTA_FINAL,
+    )
+    nota_final_texto, nota_final_paginas = extraer_texto_seccion_con_paginas_pdf(
+        pdf_path,
+        SECTION_NOTA_FINAL,
+        SECTION_BIBLIOGRAFIA,
+    )
+    nrc = extraer_nrc_desde_ruta(pdf_path)
+    sources = _build_syllabus_sources(
+        nrc=nrc,
+        evaluaciones=evaluaciones,
+        evaluaciones_paginas=evaluaciones_paginas,
+        requisitos_texto=requisitos_texto,
+        requisitos_paginas=requisitos_paginas,
+        nota_final_texto=nota_final_texto,
+        nota_final_paginas=nota_final_paginas,
+    )
 
     return {
-        "nrc": extraer_nrc_desde_ruta(pdf_path),
-        "evaluaciones": extraer_evaluaciones_y_ponderaciones_pdf(pdf_path),
+        "nrc": nrc,
+        "evaluaciones": evaluaciones,
         "requisitos_aprobacion": requisitos_texto,
         "nota_final": nota_final_texto,
+        "_sources": sources,
     }
 
 
@@ -402,4 +424,58 @@ def extract_normalized_syllabus_json_from_pdf(syllabus: Any) -> dict[str, Any]:
     nrc = str(getattr(syllabus, "nrc", "") or "").strip() or extraer_nrc_desde_ruta(pdf_path)
     result = generar_json_syllabus(pdf_path)
     result["nrc"] = nrc
+    result["_sources"] = [
+        {**source, "nrc": nrc, "source_id": re.sub(r"^[^:]+:", f"{nrc}:", source["source_id"], count=1)}
+        for source in result.get("_sources", [])
+        if isinstance(source, dict) and source.get("source_id")
+    ]
     return result
+
+
+def _build_syllabus_sources(
+    *,
+    nrc: str,
+    evaluaciones: list[dict[str, Any]],
+    evaluaciones_paginas: list[int],
+    requisitos_texto: str,
+    requisitos_paginas: list[int],
+    nota_final_texto: str,
+    nota_final_paginas: list[int],
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+
+    for index, evaluation in enumerate(evaluaciones):
+        entry = build_source_entry(
+            nrc=nrc,
+            section="evaluaciones",
+            field_path=f"evaluaciones[{index}]",
+            text=_format_evaluation_source_text(evaluation),
+            page_numbers=evaluaciones_paginas,
+            source_type="evaluation_row",
+        )
+        if entry:
+            sources.append(entry)
+
+    for section, text, pages in (
+        ("requisitos_aprobacion", requisitos_texto, requisitos_paginas),
+        ("nota_final", nota_final_texto, nota_final_paginas),
+    ):
+        entry = build_source_entry(
+            nrc=nrc,
+            section=section,
+            field_path=section,
+            text=text,
+            page_numbers=pages,
+        )
+        if entry:
+            sources.append(entry)
+
+    return sources
+
+
+def _format_evaluation_source_text(evaluation: dict[str, Any]) -> str:
+    tipo = limpiar_texto(evaluation.get("tipo")) or ""
+    ponderacion = evaluation.get("ponderacion")
+    descripcion = limpiar_texto(evaluation.get("descripcion")) or ""
+    parts = [part for part in (tipo, f"{ponderacion}%" if ponderacion is not None else "", descripcion) if part]
+    return " ".join(parts)

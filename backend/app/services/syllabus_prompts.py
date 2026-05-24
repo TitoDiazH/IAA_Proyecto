@@ -8,8 +8,9 @@ SYLLABUS_COMPARISON_SYSTEM_PROMPT = """
 Eres un revisor académico experto en consistencia de syllabus universitarios.
 
 Recibes únicamente JSON estructurados, uno por syllabus/NRC de un mismo curso.
-Cada JSON contiene solo estos campos: nrc, evaluaciones, requisitos_aprobacion
-y nota_final. No debes usar ni inferir datos fuera de esos campos.
+Cada JSON contiene nrc, evaluaciones, requisitos_aprobacion, nota_final y,
+cuando esté disponible, _sources con referencias de origen. No debes usar ni
+inferir datos fuera de esos campos.
 
 Tu tarea es comparar todos los JSON de forma agregada y detectar diferencias
 sustantivas entre secciones/NRC del mismo curso.
@@ -55,8 +56,9 @@ Salida:
 - Devuelve exclusivamente JSON válido.
 - Todo el texto generado debe estar en español neutro.
 - En cada inconsistencia, evidence debe contener las citas textuales breves que justifican
-  el análisis. Cada cita debe indicar el NRC, page = null y text con el fragmento exacto
-  tomado de evaluaciones, requisitos_aprobacion o nota_final.
+  el análisis. Cada cita debe indicar el NRC, source_id cuando exista en _sources, page
+  si está disponible y text con el fragmento exacto tomado de evaluaciones,
+  requisitos_aprobacion o nota_final.
 - Incluye citas para los NRC relevantes del contraste, especialmente el valor mayoritario
   y el o los NRC que se apartan.
 - Si un dato no puede determinarse con seguridad, usa null y agrega una advertencia en warnings.
@@ -140,6 +142,9 @@ SYLLABUS_COMPARISON_SCHEMA: dict[str, Any] = {
                                 "nrc": {"type": "string"},
                                 "page": {"type": ["integer", "null"]},
                                 "text": {"type": ["string", "null"]},
+                                "source_id": {"type": ["string", "null"]},
+                                "section": {"type": ["string", "null"]},
+                                "field_path": {"type": ["string", "null"]},
                             },
                             "required": ["nrc", "page", "text"],
                         },
@@ -189,9 +194,10 @@ Instrucciones para la comparación:
 - Si falta un dato en uno o más NRC, repórtalo solo si la omisión afecta evaluación,
   aprobación, fórmula de nota final o interpretación académica relevante.
 - En evidence devuelve una lista de citas textuales breves que expliquen por qué detectaste
-  la inconsistencia. Cada item debe incluir nrc, page = null y text con el fragmento exacto
-  tomado de evaluaciones, requisitos_aprobacion o nota_final. Incluye al menos una cita por
-  cada NRC involucrado cuando exista texto disponible.
+  la inconsistencia. Cada item debe incluir nrc, page si está disponible, source_id si
+  puedes asociarlo a un item de _sources, y text con el fragmento exacto tomado de
+  evaluaciones, requisitos_aprobacion o nota_final. Incluye al menos una cita por cada
+  NRC involucrado cuando exista texto disponible.
 - Todo el contenido textual producido debe estar en español neutro.
 - Devuelve exclusivamente JSON válido siguiendo el schema definido.
 """.strip()

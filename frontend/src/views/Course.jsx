@@ -117,9 +117,28 @@ function normalizeEvaluationRow(value) {
   return { tipo, ponderacion, descripcion };
 }
 
+function parsePlainEvaluationEvidenceText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^(?<tipo>.+?)\s+(?<ponderacion>\d+(?:[.,]\d+)?\s*%)\s+(?<descripcion>.+)$/
+  );
+  if (!match?.groups) return null;
+
+  const tipo = match.groups.tipo.trim();
+  const ponderacion = match.groups.ponderacion.trim();
+  const descripcion = match.groups.descripcion.trim();
+  if (!tipo || !ponderacion || !descripcion) return null;
+
+  return [{ tipo, ponderacion, descripcion }];
+}
+
 function parseEvaluationEvidenceText(text) {
   const trimmed = String(text || "").trim();
-  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) return null;
+  if (!trimmed.startsWith("[") && !trimmed.startsWith("{")) {
+    return parsePlainEvaluationEvidenceText(trimmed);
+  }
 
   try {
     const parsed = JSON.parse(trimmed);
@@ -147,6 +166,14 @@ function normalizeEvidence(evidence) {
       return {
         nrc: String(item?.nrc || "").trim(),
         page: item?.page ?? null,
+        sourceId: item?.source_id || item?.sourceId || null,
+        section: item?.section || null,
+        fieldPath: item?.field_path || item?.fieldPath || null,
+        matchStatus: item?.match_status || item?.matchStatus || "legacy",
+        confidence: Number.isFinite(Number(item?.confidence))
+          ? Number(item.confidence)
+          : null,
+        rects: Array.isArray(item?.rects) ? item.rects : [],
         text: evaluationRows
           ? evaluationRows.map(formatEvaluationEvidence).join(" | ")
           : rawText,
@@ -192,25 +219,74 @@ function collectReportHighlights(report) {
   });
 }
 
-function findMatchingItemIndexes(textItems, quoteText) {
+function evidenceStatusLabel(status) {
+  if (status === "verified") return "Verificada";
+  if (status === "approximate" || status === "source_resolved") return "Aproximada";
+  if (status === "unverified") return "No verificada";
+  return null;
+}
+
+function textItemToPartialRect(item, viewport, startRatio = 0, endRatio = 1) {
+  const rect = textItemToRect(item, viewport);
+  const clampedStart = Math.min(Math.max(startRatio, 0), 1);
+  const clampedEnd = Math.min(Math.max(endRatio, clampedStart), 1);
+  const left = rect.left + rect.width * clampedStart;
+  const width = Math.max(rect.width * (clampedEnd - clampedStart), 4);
+  return { ...rect, left, width };
+}
+
+function rectsForMatchedSpan(textItems, viewport, mappings, spanStart, spanEnd) {
+  return mappings
+    .map((mapping) => {
+      const overlapStart = Math.max(spanStart, mapping.start);
+      const overlapEnd = Math.min(spanEnd, mapping.end);
+      if (overlapEnd <= overlapStart || !mapping.text.length) return null;
+
+      const localStart = overlapStart - mapping.start;
+      const localEnd = overlapEnd - mapping.start;
+      return textItemToPartialRect(
+        textItems[mapping.itemIndex],
+        viewport,
+        localStart / mapping.text.length,
+        localEnd / mapping.text.length
+      );
+    })
+    .filter(Boolean);
+}
+
+function findMatchingTextRects(textItems, viewport, quoteText) {
   const quote = normalizeForMatch(quoteText);
   if (quote.length < 4) return [];
 
   const itemTexts = textItems.map((item) => normalizeForMatch(item.str));
   for (let start = 0; start < itemTexts.length; start += 1) {
     let windowText = "";
-    const indexes = [];
+    const mappings = [];
 
-    for (let end = start; end < itemTexts.length && indexes.length < 80; end += 1) {
+    for (let end = start; end < itemTexts.length && mappings.length < 80; end += 1) {
       const itemText = itemTexts[end];
       if (!itemText) continue;
 
-      windowText = windowText ? `${windowText} ${itemText}` : itemText;
-      indexes.push(end);
+      if (windowText) windowText += " ";
+      const itemStart = windowText.length;
+      windowText += itemText;
+      const itemEnd = windowText.length;
+      mappings.push({ itemIndex: end, start: itemStart, end: itemEnd, text: itemText });
+
+      const matchStart = windowText.indexOf(quote);
+      if (matchStart !== -1) {
+        return rectsForMatchedSpan(
+          textItems,
+          viewport,
+          mappings,
+          matchStart,
+          matchStart + quote.length
+        );
+      }
 
       const enoughContext = windowText.length >= Math.max(quote.length * 0.65, 12);
-      if (windowText.includes(quote) || (enoughContext && quote.includes(windowText))) {
-        return indexes;
+      if (enoughContext && quote.includes(windowText)) {
+        return mappings.map((mapping) => textItemToRect(textItems[mapping.itemIndex], viewport));
       }
 
       if (windowText.length > quote.length * 1.8 + 40) {
@@ -220,6 +296,33 @@ function findMatchingItemIndexes(textItems, quoteText) {
   }
 
   return [];
+}
+
+function rectsFromEvidence(highlight) {
+  if (!highlight.rects?.length) return [];
+
+  return highlight.rects
+    .map((rect, index) => {
+      const left = Number(rect.left ?? rect.x);
+      const top = Number(rect.top ?? rect.y);
+      const width = Number(rect.width ?? rect.w);
+      const height = Number(rect.height ?? rect.h);
+      if (![left, top, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+        return null;
+      }
+      return {
+        left,
+        top,
+        width,
+        height,
+        color: highlight.color,
+        severity: highlight.severity,
+        title: `NRC ${highlight.nrc}: ${highlight.variable}`,
+        isFocused: false,
+        key: `${highlight.inconsistencyId}-rect-${index}`,
+      };
+    })
+    .filter(Boolean);
 }
 
 function textItemToRect(item, viewport) {
@@ -263,6 +366,54 @@ function evaluationRowScore(rowText, row) {
     Boolean(row.descripcion) && hasMeaningfulTerm(rowText, row.descripcion),
   ];
   return checks.filter(Boolean).length;
+}
+
+function findNormalizedWindowIndexes(items, phrase, maxItems = 20) {
+  const normalizedPhrase = normalizeForMatch(phrase);
+  if (!normalizedPhrase) return [];
+
+  for (let start = 0; start < items.length; start += 1) {
+    let windowText = "";
+    const indexes = [];
+
+    for (let end = start; end < items.length && indexes.length < maxItems; end += 1) {
+      const itemText = items[end].text;
+      if (!itemText) continue;
+
+      windowText = windowText ? `${windowText} ${itemText}` : itemText;
+      indexes.push(items[end].index);
+
+      if (windowText.includes(normalizedPhrase) || normalizedPhrase.includes(windowText)) {
+        return indexes;
+      }
+
+      if (windowText.length > normalizedPhrase.length * 1.8 + 20) {
+        break;
+      }
+    }
+  }
+
+  return [];
+}
+
+function findEvaluationRowPartIndexes(textRow, evaluationRow) {
+  const indexes = new Set();
+  findNormalizedWindowIndexes(textRow.items, evaluationRow.tipo, 8).forEach((index) =>
+    indexes.add(index)
+  );
+
+  const expectedWeight = normalizeWeight(evaluationRow.ponderacion);
+  if (expectedWeight !== null) {
+    textRow.items
+      .filter((item) => textHasWeight(item.text, expectedWeight))
+      .forEach((item) => indexes.add(item.index));
+  }
+
+  findNormalizedWindowIndexes(textRow.items, evaluationRow.descripcion, 24).forEach((index) =>
+    indexes.add(index)
+  );
+
+  return Array.from(indexes);
 }
 
 function groupTextItemsByLine(textItems, viewport) {
@@ -317,7 +468,13 @@ function findEvaluationRowItemIndexes(textItems, viewport, evaluationRows) {
       }
     }
 
-    bestMatch?.textRow.items.forEach((item) => matchedIndexes.add(item.index));
+    if (bestMatch?.textRow) {
+      const partIndexes = findEvaluationRowPartIndexes(bestMatch.textRow, evaluationRow);
+      const indexes = partIndexes.length
+        ? partIndexes
+        : bestMatch.textRow.items.map((item) => item.index);
+      indexes.forEach((index) => matchedIndexes.add(index));
+    }
   }
 
   return Array.from(matchedIndexes);
@@ -325,19 +482,26 @@ function findEvaluationRowItemIndexes(textItems, viewport, evaluationRows) {
 
 function buildHighlightRects(textItems, viewport, highlights, activeHighlightId) {
   return highlights.flatMap((highlight, highlightIndex) => {
+    const evidenceRects = rectsFromEvidence(highlight).map((rect) => ({
+      ...rect,
+      isFocused: highlight.highlightId === activeHighlightId,
+    }));
+    if (evidenceRects.length) return evidenceRects;
+
     const structuredIndexes = highlight.evaluationRows?.length
       ? findEvaluationRowItemIndexes(textItems, viewport, highlight.evaluationRows)
       : [];
-    const matchedIndexes = structuredIndexes.length
-      ? structuredIndexes
-      : findMatchingItemIndexes(textItems, highlight.text);
-    return matchedIndexes.map((itemIndex) => ({
-      ...textItemToRect(textItems[itemIndex], viewport),
+    const matchedRects = structuredIndexes.length
+      ? structuredIndexes.map((itemIndex) => textItemToRect(textItems[itemIndex], viewport))
+      : findMatchingTextRects(textItems, viewport, highlight.text);
+
+    return matchedRects.map((rect, rectIndex) => ({
+      ...rect,
       color: highlight.color,
       severity: highlight.severity,
       title: `NRC ${highlight.nrc}: ${highlight.variable}`,
       isFocused: highlight.highlightId === activeHighlightId,
-      key: `${highlight.inconsistencyId}-${highlightIndex}-${itemIndex}`,
+      key: `${highlight.inconsistencyId}-${highlightIndex}-${rectIndex}`,
     }));
   });
 }
@@ -462,14 +626,21 @@ function InconsistencyCard({ item, onEvidenceSelect }) {
               {evidence.map((quote, index) => (
                 <blockquote
                   key={`${quote.nrc}-${index}`}
-                  className="evidence-item"
+                  className={`evidence-item evidence-item-${quote.matchStatus}`}
                   role="button"
                   tabIndex={0}
-                  title="Ir a esta cita en el PDF"
+                  title={quote.page ? "Ir a esta cita en el PDF" : "Buscar esta cita en el PDF"}
                   onClick={() => onEvidenceSelect?.(quote, item, index)}
                   onKeyDown={(event) => handleEvidenceKeyDown(event, quote, index)}
                 >
-                  <span className="evidence-nrc">NRC {quote.nrc}</span>
+                  <span className="evidence-meta">
+                    <span className="evidence-nrc">NRC {quote.nrc}</span>
+                    {evidenceStatusLabel(quote.matchStatus) && (
+                      <span className={`evidence-status evidence-status-${quote.matchStatus}`}>
+                        {evidenceStatusLabel(quote.matchStatus)}
+                      </span>
+                    )}
+                  </span>
                   <p>{quote.text}</p>
                   {quote.page && <small>Página {quote.page}</small>}
                 </blockquote>
@@ -545,6 +716,8 @@ function PdfRenderedPage({
     loading: true,
     width: 0,
     height: 0,
+    textItems: [],
+    viewport: null,
     rects: [],
   });
 
@@ -553,7 +726,13 @@ function PdfRenderedPage({
     let renderTask = null;
 
     async function renderPage() {
-      setPageState((current) => ({ ...current, loading: true, rects: [] }));
+      setPageState((current) => ({
+        ...current,
+        loading: true,
+        textItems: [],
+        viewport: null,
+        rects: [],
+      }));
 
       try {
         const page = await pdfDocument.getPage(pageNumber);
@@ -571,30 +750,23 @@ function PdfRenderedPage({
         const [textContent] = await Promise.all([page.getTextContent(), renderTask.promise]);
         if (cancelled) return;
 
-        const pageHighlights = highlights.filter(
-          (highlight) => !highlight.page || Number(highlight.page) === pageNumber
-        );
-        const rects = buildHighlightRects(
-          textContent.items,
-          viewport,
-          pageHighlights,
-          activeHighlightId
-        );
-        const focusedRect = rects.find((rect) => rect.isFocused);
         setPageState({
           loading: false,
           width: viewport.width,
           height: viewport.height,
-          rects,
+          textItems: textContent.items,
+          viewport,
+          rects: [],
         });
-        if (focusedRect) {
-          onFocusedMatch?.(pageNumber, focusedRect.top);
-        } else {
-          onPageReady?.(pageNumber);
-        }
       } catch {
         if (!cancelled) {
-          setPageState((current) => ({ ...current, loading: false, rects: [] }));
+          setPageState((current) => ({
+            ...current,
+            loading: false,
+            textItems: [],
+            viewport: null,
+            rects: [],
+          }));
         }
       }
     }
@@ -605,7 +777,38 @@ function PdfRenderedPage({
       cancelled = true;
       renderTask?.cancel?.();
     };
-  }, [activeHighlightId, highlights, onFocusedMatch, onPageReady, pageNumber, pdfDocument]);
+  }, [pageNumber, pdfDocument]);
+
+  useEffect(() => {
+    if (pageState.loading || !pageState.viewport) return;
+
+    const pageHighlights = highlights.filter(
+      (highlight) => !highlight.page || Number(highlight.page) === pageNumber
+    );
+    const rects = buildHighlightRects(
+      pageState.textItems,
+      pageState.viewport,
+      pageHighlights,
+      activeHighlightId
+    );
+    const focusedRect = rects.find((rect) => rect.isFocused);
+
+    setPageState((current) => ({ ...current, rects }));
+    if (focusedRect) {
+      onFocusedMatch?.(pageNumber, focusedRect.top);
+    } else {
+      onPageReady?.(pageNumber);
+    }
+  }, [
+    activeHighlightId,
+    highlights,
+    onFocusedMatch,
+    onPageReady,
+    pageNumber,
+    pageState.loading,
+    pageState.textItems,
+    pageState.viewport,
+  ]);
 
   return (
     <div

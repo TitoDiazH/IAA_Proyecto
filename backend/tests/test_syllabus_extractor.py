@@ -90,7 +90,9 @@ def test_generar_json_syllabus_uses_only_real_condition_sections(monkeypatch):
 
     result = syllabus_extractor.generar_json_syllabus("202610-ING-1000-NRC-7579-CURSO.pdf")
 
-    assert set(result) == {"nrc", "evaluaciones", "requisitos_aprobacion", "nota_final"}
+    assert set(result) == {"nrc", "evaluaciones", "requisitos_aprobacion", "nota_final", "_sources"}
     assert result["nrc"] == "7579"
     assert "NP >= 5.5" in result["requisitos_aprobacion"]
     assert result["nota_final"] == "NF = 0.7 NP + 0.3 EX"
+    assert result["_sources"][0]["source_id"] == "7579:requisitos_aprobacion:requisitos_aprobacion"
+    assert result["_sources"][0]["page"] == 1
