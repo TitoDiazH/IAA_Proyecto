@@ -90,6 +90,7 @@ def conditions_table_to_xlsx(table: dict[str, Any]) -> bytes:
         archive.writestr("_rels/.rels", _root_relationships_xml())
         archive.writestr("xl/workbook.xml", _workbook_xml())
         archive.writestr("xl/_rels/workbook.xml.rels", _workbook_relationships_xml())
+        archive.writestr("xl/styles.xml", _styles_xml())
         archive.writestr("xl/worksheets/sheet1.xml", _worksheet_xml(rows))
     return buffer.getvalue()
 
@@ -447,27 +448,127 @@ def _clean(value: Any) -> str:
 
 
 def _cell_ref(row_index: int, col_index: int) -> str:
+    return f"{_column_name(col_index)}{row_index}"
+
+
+def _column_name(col_index: int) -> str:
     letters = ""
     col = col_index
     while col:
         col, remainder = divmod(col - 1, 26)
         letters = chr(65 + remainder) + letters
-    return f"{letters}{row_index}"
+    return letters
 
 
 def _worksheet_xml(rows: list[list[str]]) -> str:
+    max_cols = max((len(row) for row in rows), default=len(COLUMNS))
+    max_rows = max(len(rows), 1)
     row_xml = []
     for row_index, row in enumerate(rows, start=1):
         cells = []
-        for col_index, value in enumerate(row, start=1):
+        padded_row = [*row, *([""] * (max_cols - len(row)))]
+        for col_index, value in enumerate(padded_row, start=1):
             ref = _cell_ref(row_index, col_index)
-            cells.append(f'<c r="{ref}" t="inlineStr"><is><t>{escape(str(value))}</t></is></c>')
-        row_xml.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+            style = _xlsx_style_for_cell(row_index, col_index, max_cols)
+            style_attr = f' s="{style}"' if style else ""
+            clean_value = str(value or "")
+            if clean_value:
+                cells.append(f'<c r="{ref}"{style_attr} t="inlineStr"><is><t>{escape(clean_value)}</t></is></c>')
+            else:
+                cells.append(f'<c r="{ref}"{style_attr}/>')
+        row_xml.append(f'<row r="{row_index}" spans="1:{max_cols}">{"".join(cells)}</row>')
 
+    merge_cells = _merge_cells_xml(max_cols)
+    dimension = f"A1:{_cell_ref(max_rows, max_cols)}"
     return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="{dimension}"/>
+  <sheetViews>
+    <sheetView workbookViewId="0">
+      <pane xSplit="3" ySplit="3" topLeftCell="D4" activePane="bottomRight" state="frozen"/>
+      <selection pane="topRight" activeCell="D1" sqref="D1"/>
+      <selection pane="bottomLeft" activeCell="A4" sqref="A4"/>
+      <selection pane="bottomRight" activeCell="A4" sqref="A4"/>
+    </sheetView>
+  </sheetViews>
+  <sheetFormatPr baseColWidth="10" defaultRowHeight="15"/>
+  {_columns_xml(max_cols)}
   <sheetData>{''.join(row_xml)}</sheetData>
+  {merge_cells}
+  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
 </worksheet>'''
+
+
+def _xlsx_style_for_cell(row_index: int, col_index: int, max_cols: int) -> int:
+    if row_index == 1:
+        if 4 <= col_index <= min(12, max_cols):
+            return 2
+        if 13 <= col_index <= min(14, max_cols):
+            return 1
+        return 0
+    if row_index == 2:
+        if 4 <= col_index <= min(14, max_cols):
+            return 2
+        return 0
+    if row_index == 3:
+        if col_index in {1, 2, 15, 16, 17, 18, 19}:
+            return 1
+        if 3 <= col_index <= min(14, max_cols):
+            return 2
+        return 1
+    if col_index in {3, 5, 7, 9, 10, 11, 12, 14}:
+        return 4
+    if col_index in {4, 6, 8, 13}:
+        return 5
+    return 3
+
+
+def _columns_xml(max_cols: int) -> str:
+    widths = [
+        33,
+        8.3,
+        7,
+        12.3,
+        6.4,
+        12.3,
+        6.4,
+        11.4,
+        6.4,
+        8.9,
+        6.6,
+        13.7,
+        11.4,
+        6.4,
+        21.6,
+        67.9,
+        48.6,
+        75,
+        53.9,
+    ]
+    col_xml = [
+        f'<col min="{index}" max="{index}" width="{widths[index - 1]}" customWidth="1"/>'
+        for index in range(1, min(max_cols, len(widths)) + 1)
+    ]
+    return f"<cols>{''.join(col_xml)}</cols>" if col_xml else ""
+
+
+def _merge_cells_xml(max_cols: int) -> str:
+    refs = []
+    if max_cols >= 12:
+        refs.append("D1:L1")
+    if max_cols >= 5:
+        refs.append("D2:E2")
+    if max_cols >= 7:
+        refs.append("F2:G2")
+    if max_cols >= 9:
+        refs.append("H2:I2")
+    if max_cols >= 12:
+        refs.append("K2:L2")
+    if max_cols >= 14:
+        refs.append("M2:N2")
+    if not refs:
+        return ""
+    return f'<mergeCells count="{len(refs)}">{"".join(f"<mergeCell ref=\"{ref}\"/>" for ref in refs)}</mergeCells>'
 
 
 def _content_types_xml() -> str:
@@ -477,6 +578,7 @@ def _content_types_xml() -> str:
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>'''
 
 
@@ -498,4 +600,44 @@ def _workbook_relationships_xml() -> str:
     return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>'''
+
+
+def _styles_xml() -> str:
+    return '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="3">
+    <font><sz val="11"/><color rgb="FF000000"/><name val="Aptos Narrow"/><family val="2"/></font>
+    <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Aptos Narrow"/><family val="2"/></font>
+    <font><b/><sz val="11"/><color rgb="FF000000"/><name val="Aptos Narrow"/><family val="2"/></font>
+  </fonts>
+  <fills count="4">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF156082"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF0B3041"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFD9E2E7"/></left>
+      <right style="thin"><color rgb="FFD9E2E7"/></right>
+      <top style="thin"><color rgb="FFD9E2E7"/></top>
+      <bottom style="thin"><color rgb="FFD9E2E7"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="6">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"/></xf>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>'''
