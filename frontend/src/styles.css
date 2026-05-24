@@ -936,6 +936,19 @@ a {
   color: #203128;
 }
 
+.card-status--active .spin {
+  flex: 0 0 auto;
+  animation: card-status-spin 900ms linear infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+@keyframes card-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .analysis-status {
   display: inline-flex;
   align-items: center;
@@ -1926,5 +1939,9 @@ th {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .card-status--active .spin {
+    animation: card-status-spin 1200ms linear infinite !important;
   }
 }
