@@ -1333,6 +1333,7 @@ a {
   width: 0.625rem;
   height: 0.625rem;
   border-radius: 999px;
+  box-sizing: border-box;
 }
 
 .legend-dot-critica {
@@ -1340,7 +1341,8 @@ a {
 }
 
 .legend-dot-moderada {
-  background: rgba(245, 158, 11, 0.88);
+  border: 1px solid var(--warning-border);
+  background: var(--warning-bg);
 }
 
 .legend-dot-menor {

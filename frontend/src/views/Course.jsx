@@ -22,7 +22,7 @@ const PDF_RENDER_SCALE = 1.08;
 const HIGHLIGHT_COLORS = {
   critica: "rgba(198, 40, 40, 0.30)",
   crítica: "rgba(198, 40, 40, 0.30)",
-  moderada: "rgba(245, 158, 11, 0.32)",
+  moderada: "var(--warning-bg)",
   menor: "rgba(37, 99, 235, 0.24)",
 };
 
@@ -166,6 +166,11 @@ function normalizeEvidence(evidence) {
       return {
         nrc: String(item?.nrc || "").trim(),
         page: item?.page ?? null,
+        pageNumbers: Array.isArray(item?.page_numbers)
+          ? item.page_numbers
+          : Array.isArray(item?.pageNumbers)
+            ? item.pageNumbers
+            : [],
         sourceId: item?.source_id || item?.sourceId || null,
         section: item?.section || null,
         fieldPath: item?.field_path || item?.fieldPath || null,
@@ -235,18 +240,26 @@ function textItemToPartialRect(item, viewport, startRatio = 0, endRatio = 1) {
   return { ...rect, left, width };
 }
 
-function rectsForMatchedSpan(textItems, viewport, mappings, spanStart, spanEnd) {
+function rectsForMatchedSpan(mappings, spanStart, spanEnd, pageNumber = null) {
   return mappings
     .map((mapping) => {
+      if (pageNumber !== null && mapping.pageNumber !== pageNumber) return null;
       const overlapStart = Math.max(spanStart, mapping.start);
       const overlapEnd = Math.min(spanEnd, mapping.end);
-      if (overlapEnd <= overlapStart || !mapping.text.length) return null;
+      if (
+        overlapEnd <= overlapStart ||
+        !mapping.text.length ||
+        !mapping.item ||
+        !mapping.viewport
+      ) {
+        return null;
+      }
 
       const localStart = overlapStart - mapping.start;
       const localEnd = overlapEnd - mapping.start;
       return textItemToPartialRect(
-        textItems[mapping.itemIndex],
-        viewport,
+        mapping.item,
+        mapping.viewport,
         localStart / mapping.text.length,
         localEnd / mapping.text.length
       );
@@ -254,11 +267,25 @@ function rectsForMatchedSpan(textItems, viewport, mappings, spanStart, spanEnd) 
     .filter(Boolean);
 }
 
-function findMatchingTextRects(textItems, viewport, quoteText) {
+function createSearchItems(pageSegments) {
+  return pageSegments.flatMap((segment) =>
+    segment.textItems.map((item, itemIndex) => ({
+      item,
+      itemIndex,
+      pageNumber: segment.pageNumber,
+      viewport: segment.viewport,
+      text: normalizeForMatch(item.str),
+    }))
+  );
+}
+
+function findMatchingTextRectsInSegments(pageSegments, quoteText, pageNumber = null) {
   const quote = normalizeForMatch(quoteText);
   if (quote.length < 4) return [];
 
-  const itemTexts = textItems.map((item) => normalizeForMatch(item.str));
+  const searchItems = createSearchItems(pageSegments);
+  const itemTexts = searchItems.map((item) => item.text);
+
   for (let start = 0; start < itemTexts.length; start += 1) {
     let windowText = "";
     const mappings = [];
@@ -271,22 +298,60 @@ function findMatchingTextRects(textItems, viewport, quoteText) {
       const itemStart = windowText.length;
       windowText += itemText;
       const itemEnd = windowText.length;
-      mappings.push({ itemIndex: end, start: itemStart, end: itemEnd, text: itemText });
+      mappings.push({
+        item: searchItems[end].item,
+        itemIndex: searchItems[end].itemIndex,
+        pageNumber: searchItems[end].pageNumber,
+        viewport: searchItems[end].viewport,
+        start: itemStart,
+        end: itemEnd,
+        text: itemText,
+      });
 
       const matchStart = windowText.indexOf(quote);
       if (matchStart !== -1) {
-        return rectsForMatchedSpan(
-          textItems,
-          viewport,
+        const rects = rectsForMatchedSpan(
           mappings,
           matchStart,
-          matchStart + quote.length
+          matchStart + quote.length,
+          pageNumber
         );
+        if (rects.length) return rects;
       }
 
-      const enoughContext = windowText.length >= Math.max(quote.length * 0.65, 12);
+      if (windowText.length > quote.length * 1.8 + 40) {
+        break;
+      }
+    }
+  }
+
+  for (let start = 0; start < itemTexts.length; start += 1) {
+    let windowText = "";
+    const mappings = [];
+
+    for (let end = start; end < itemTexts.length && mappings.length < 80; end += 1) {
+      const itemText = itemTexts[end];
+      if (!itemText) continue;
+
+      windowText = windowText ? `${windowText} ${itemText}` : itemText;
+      mappings.push({
+        item: searchItems[end].item,
+        itemIndex: searchItems[end].itemIndex,
+        pageNumber: searchItems[end].pageNumber,
+        viewport: searchItems[end].viewport,
+        start: Math.max(windowText.length - itemText.length, 0),
+        end: windowText.length,
+        text: itemText,
+      });
+
+      const enoughContext =
+        windowText.length >= Math.min(Math.max(quote.length * 0.3, 12), 36);
       if (enoughContext && quote.includes(windowText)) {
-        return mappings.map((mapping) => textItemToRect(textItems[mapping.itemIndex], viewport));
+        const rects = mappings
+          .filter((mapping) => pageNumber === null || mapping.pageNumber === pageNumber)
+          .filter((mapping) => mapping.item && mapping.viewport)
+          .map((mapping) => textItemToRect(mapping.item, mapping.viewport));
+        if (rects.length) return rects;
       }
 
       if (windowText.length > quote.length * 1.8 + 40) {
@@ -480,7 +545,40 @@ function findEvaluationRowItemIndexes(textItems, viewport, evaluationRows) {
   return Array.from(matchedIndexes);
 }
 
-function buildHighlightRects(textItems, viewport, highlights, activeHighlightId) {
+function shouldEvaluateHighlightOnPage(highlight, pageNumber) {
+  const candidatePages = [
+    highlight.page,
+    ...(Array.isArray(highlight.pageNumbers) ? highlight.pageNumbers : []),
+  ]
+    .map((page) => Number(page))
+    .filter((page) => Number.isFinite(page) && page > 0);
+
+  if (!candidatePages.length) return true;
+  return candidatePages.some((page) => Math.abs(page - pageNumber) <= 1);
+}
+
+async function loadTextSegment(pdfDocument, pageNumber, pageCount) {
+  if (pageNumber < 1 || pageNumber > pageCount) return null;
+
+  const page = await pdfDocument.getPage(pageNumber);
+  const textContent = await page.getTextContent();
+  return {
+    pageNumber,
+    textItems: textContent.items,
+    viewport: null,
+  };
+}
+
+function buildHighlightRects(
+  textItems,
+  viewport,
+  highlights,
+  activeHighlightId,
+  pageNumber = null,
+  pageSegments = null
+) {
+  const searchableSegments = pageSegments || [{ pageNumber, textItems, viewport }];
+
   return highlights.flatMap((highlight, highlightIndex) => {
     const evidenceRects = rectsFromEvidence(highlight).map((rect) => ({
       ...rect,
@@ -493,7 +591,11 @@ function buildHighlightRects(textItems, viewport, highlights, activeHighlightId)
       : [];
     const matchedRects = structuredIndexes.length
       ? structuredIndexes.map((itemIndex) => textItemToRect(textItems[itemIndex], viewport))
-      : findMatchingTextRects(textItems, viewport, highlight.text);
+      : findMatchingTextRectsInSegments(
+          searchableSegments,
+          highlight.matchText || highlight.text,
+          pageNumber
+        );
 
     return matchedRects.map((rect, rectIndex) => ({
       ...rect,
@@ -556,7 +658,6 @@ function ReportView({ report, onEvidenceSelect }) {
             <div key={section} className="report-section-group">
               <div className="report-section-heading">
                 <div>
-                  <span className="report-section-kicker">Apartado del syllabus</span>
                   <h4 className="report-section-name">{formatSyllabusLabel(section)}</h4>
                 </div>
                 <span className="report-section-count">
@@ -705,6 +806,7 @@ function SyllabusDocumentSelector({ syllabi, activeIndex, onSelect }) {
 function PdfRenderedPage({
   pdfDocument,
   pageNumber,
+  pageCount,
   highlights,
   activeHighlightId,
   isTargetPage,
@@ -782,28 +884,68 @@ function PdfRenderedPage({
   useEffect(() => {
     if (pageState.loading || !pageState.viewport) return;
 
-    const pageHighlights = highlights.filter(
-      (highlight) => !highlight.page || Number(highlight.page) === pageNumber
-    );
-    const rects = buildHighlightRects(
-      pageState.textItems,
-      pageState.viewport,
-      pageHighlights,
-      activeHighlightId
-    );
-    const focusedRect = rects.find((rect) => rect.isFocused);
+    let cancelled = false;
 
-    setPageState((current) => ({ ...current, rects }));
-    if (focusedRect) {
-      onFocusedMatch?.(pageNumber, focusedRect.top);
-    } else {
-      onPageReady?.(pageNumber);
+    async function updateHighlightRects() {
+      const pageHighlights = highlights.filter((highlight) =>
+        shouldEvaluateHighlightOnPage(highlight, pageNumber)
+      );
+      if (!pageHighlights.length) {
+        setPageState((current) => ({ ...current, rects: [] }));
+        onPageReady?.(pageNumber);
+        return;
+      }
+
+      const needsBoundarySearch = pageHighlights.some(
+        (highlight) => !highlight.rects?.length && !highlight.evaluationRows?.length
+      );
+      const [previousSegment, nextSegment] = needsBoundarySearch
+        ? await Promise.all([
+            loadTextSegment(pdfDocument, pageNumber - 1, pageCount).catch(() => null),
+            loadTextSegment(pdfDocument, pageNumber + 1, pageCount).catch(() => null),
+          ])
+        : [null, null];
+      if (cancelled) return;
+
+      const pageSegments = [
+        previousSegment,
+        {
+          pageNumber,
+          textItems: pageState.textItems,
+          viewport: pageState.viewport,
+        },
+        nextSegment,
+      ].filter(Boolean);
+      const rects = buildHighlightRects(
+        pageState.textItems,
+        pageState.viewport,
+        pageHighlights,
+        activeHighlightId,
+        pageNumber,
+        pageSegments
+      );
+      const focusedRect = rects.find((rect) => rect.isFocused);
+
+      setPageState((current) => ({ ...current, rects }));
+      if (focusedRect) {
+        onFocusedMatch?.(pageNumber, focusedRect.top);
+      } else {
+        onPageReady?.(pageNumber);
+      }
     }
+
+    updateHighlightRects();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     activeHighlightId,
     highlights,
     onFocusedMatch,
     onPageReady,
+    pageCount,
+    pdfDocument,
     pageNumber,
     pageState.loading,
     pageState.textItems,
@@ -952,6 +1094,7 @@ function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutRead
           key={`${syllabus.id}-${index + 1}`}
           pdfDocument={pdfDocument}
           pageNumber={index + 1}
+          pageCount={pageCount}
           highlights={highlights}
           activeHighlightId={activeHighlightId}
           isTargetPage={targetPage === index + 1}
@@ -1145,7 +1288,10 @@ export default function Course({
     const nextIndex = syllabi.findIndex((syllabus) => String(syllabus.nrc) === quoteNrc);
     if (nextIndex === -1) return;
 
-    const page = Number(quote.page) || null;
+    const page =
+      Number(quote.page) ||
+      (Array.isArray(quote.pageNumbers) ? Number(quote.pageNumbers[0]) : null) ||
+      null;
     setActiveSyllabusIndex(nextIndex);
     setQuoteJumpTarget({
       nrc: quoteNrc,
