@@ -1,7 +1,8 @@
-from pathlib import Path
+import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
@@ -10,9 +11,11 @@ from app.schemas import CourseDetail, CourseListItem, ReportRead, SyllabusRead
 from app.services.analysis_queue import enqueue_report_analysis
 from app.services.filename_parser import normalize_course_name
 from app.services.report_service import create_queued_analysis_report
+from app.services.storage_service import StorageError, download_pdf
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
+logger = logging.getLogger(__name__)
 
 
 def _latest_report(group: CourseGroup) -> AnalysisReport | None:
@@ -110,32 +113,40 @@ def latest_course_report(course_id: int, db: Session = Depends(get_db)) -> Analy
     return report
 
 
+def _pdf_response(syllabus: Syllabus, disposition: str) -> Response:
+    try:
+        content = download_pdf(syllabus.stored_path)
+    except StorageError as exc:
+        logger.warning("Could not retrieve syllabus %s: %s", syllabus.id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo recuperar el PDF desde el almacenamiento",
+        ) from exc
+
+    encoded_filename = quote(syllabus.original_filename, safe="")
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_filename}",
+            "Content-Length": str(len(content)),
+        },
+    )
+
+
 @router.get("/syllabi/{syllabus_id}/download")
-def download_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def download_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> Response:
     syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).one_or_none()
     if syllabus is None:
         raise HTTPException(status_code=404, detail="Syllabus no encontrado")
 
-    path = Path(syllabus.stored_path)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="El archivo PDF ya no existe en almacenamiento")
-
-    return FileResponse(path, filename=syllabus.original_filename, media_type="application/pdf")
+    return _pdf_response(syllabus, "attachment")
 
 
 @router.get("/syllabi/{syllabus_id}/view")
-def view_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def view_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> Response:
     syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).one_or_none()
     if syllabus is None:
         raise HTTPException(status_code=404, detail="Syllabus no encontrado")
 
-    path = Path(syllabus.stored_path)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="El archivo PDF ya no existe en almacenamiento")
-
-    return FileResponse(
-        path,
-        filename=syllabus.original_filename,
-        media_type="application/pdf",
-        content_disposition_type="inline",
-    )
+    return _pdf_response(syllabus, "inline")

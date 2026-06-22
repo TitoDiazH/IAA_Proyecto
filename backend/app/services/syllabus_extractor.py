@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from app.services.storage_service import materialize_pdf
+
 from app.services.citation_resolver import build_source_entry
 
 try:
@@ -238,11 +240,12 @@ def _parsear_evaluaciones_desde_texto(texto: str) -> list[dict[str, Any]]:
         "Tareas",
         "Trabajos",
         "Proyecto",
+        "Proyectos",
         "Presentaciones",
     ]
     tipo_pattern = "|".join(re.escape(tipo) for tipo in tipos)
     row_pattern = re.compile(
-        rf"^\s*(?P<tipo>{tipo_pattern})\b\s+(?P<ponderacion>\d+(?:[.,]\d+)?\s*%?)\b(?P<resto>.*)$",
+        rf"^\s*(?P<tipo>{tipo_pattern})\b\s+(?P<ponderacion>\d+(?:[.,]\d+)?\s*%?)\s*(?P<resto>.*)$",
         re.IGNORECASE,
     )
     lineas = _lineas_evaluaciones(texto_tabla)
@@ -420,9 +423,11 @@ def generar_json_syllabus(pdf_path: str) -> dict[str, Any]:
 
 
 def extract_normalized_syllabus_json_from_pdf(syllabus: Any) -> dict[str, Any]:
-    pdf_path = str(syllabus.stored_path)
-    nrc = str(getattr(syllabus, "nrc", "") or "").strip() or extraer_nrc_desde_ruta(pdf_path)
-    result = generar_json_syllabus(pdf_path)
+    stored_path = str(syllabus.stored_path)
+    nrc = str(getattr(syllabus, "nrc", "") or "").strip() or extraer_nrc_desde_ruta(stored_path)
+    original_filename = str(getattr(syllabus, "original_filename", "") or "syllabus.pdf")
+    with materialize_pdf(stored_path, original_filename) as pdf_path:
+        result = generar_json_syllabus(str(pdf_path))
     result["nrc"] = nrc
     result["_sources"] = [
         {**source, "nrc": nrc, "source_id": re.sub(r"^[^:]+:", f"{nrc}:", source["source_id"], count=1)}

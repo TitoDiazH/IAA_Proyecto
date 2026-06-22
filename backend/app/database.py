@@ -25,6 +25,21 @@ def _database_missing(exc: Exception, database_name: str) -> bool:
     return "does not exist" in message and database_name.lower() in message
 
 
+def _connection_error_is_non_retryable(exc: Exception) -> bool:
+    """Avoid hammering the remote pooler with invalid credentials."""
+
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "password authentication failed",
+            "too many authentication failures",
+            "ecircuitbreaker",
+            "tenant or user not found",
+        )
+    )
+
+
 def _ensure_database_exists() -> None:
     """Create the configured PostgreSQL database when a reused volume lacks it."""
 
@@ -78,6 +93,8 @@ def init_db(max_attempts: int = 30, delay_seconds: float = 1.5) -> None:
             return
         except Exception as exc:  # pragma: no cover - defensive startup loop
             last_error = exc
+            if _connection_error_is_non_retryable(exc):
+                break
             time.sleep(delay_seconds)
 
     raise RuntimeError("Could not connect to the database") from last_error

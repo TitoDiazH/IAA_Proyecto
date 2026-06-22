@@ -259,12 +259,13 @@ a {
 
 .spin {
   display: inline-block;
-  animation: spin 900ms linear infinite;
+  animation: loading-wheel-spin 900ms linear infinite;
   transform-origin: center center;
   transform-box: fill-box;
+  will-change: transform;
 }
 
-@keyframes spin {
+@keyframes loading-wheel-spin {
   to {
     transform: rotate(360deg);
   }
@@ -953,15 +954,6 @@ a {
 
 .card-status--active .spin {
   flex: 0 0 auto;
-  animation: card-status-spin 900ms linear infinite;
-  transform-origin: 50% 50%;
-  will-change: transform;
-}
-
-@keyframes card-status-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .analysis-status {
@@ -1995,7 +1987,7 @@ th {
     transition-duration: 0.01ms !important;
   }
 
-  .card-status--active .spin {
-    animation: card-status-spin 1200ms linear infinite !important;
+  .spin {
+    animation: loading-wheel-spin 1200ms linear infinite !important;
   }
 }

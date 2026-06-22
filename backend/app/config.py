@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     app_name: str = "Syllabus Review MVP"
     database_url: str = "postgresql+psycopg2://syllabus:syllabus@db:5432/syllabus_review"
     storage_dir: Path = Path("./storage")
+    supabase_url: str = ""
+    supabase_secret_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_storage_bucket: str = "Syllabus"
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_upload_mb: int = 100
     ai_request_timeout_seconds: int = 300
@@ -31,6 +35,12 @@ class Settings(BaseSettings):
     @property
     def origins(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def supabase_backend_key(self) -> str:
+        """Accept both current secret keys and legacy service-role keys."""
+
+        return self.supabase_secret_key or self.supabase_service_role_key
 
 
 @lru_cache

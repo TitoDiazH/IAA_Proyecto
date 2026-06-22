@@ -1,28 +1,10 @@
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: syllabus
-      POSTGRES_PASSWORD: syllabus
-      POSTGRES_DB: syllabus_review
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U syllabus -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   backend:
     build:
       context: ./backend
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg2://syllabus:syllabus@db:5432/syllabus_review
-      STORAGE_DIR: /app/storage
       ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       MAX_UPLOAD_MB: 100
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -30,11 +12,6 @@ services:
       AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-300}
     ports:
       - "8000:8000"
-    volumes:
-      - backend_storage:/app/storage
-    depends_on:
-      db:
-        condition: service_healthy
 
   frontend:
     build:
@@ -45,7 +22,3 @@ services:
       - "5173:5173"
     depends_on:
       - backend
-
-volumes:
-  postgres_data:
-  backend_storage:

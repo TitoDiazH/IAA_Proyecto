@@ -55,6 +55,29 @@ def test_extracts_evaluations_from_text_between_sections_across_pages(monkeypatc
     assert "Pruebas: 50.0%" in evidence
 
 
+def test_extracts_plural_projects_from_text_evaluations(monkeypatch):
+    fake_pdf = FakePdf(
+        [
+            FakePage(
+                "Evaluaciones y Ponderaciones\n"
+                "Tipo de Evaluación Ponderación (%) Descripción\n"
+                "Proyectos 80% Impact Project\n"
+                "Pruebas 20% Examen\n"
+                "Requisitos de Aprobación\n"
+                "Para aprobar se requiere NF >= 4.0."
+            ),
+        ]
+    )
+    monkeypatch.setattr(syllabus_extractor, "_abrir_pdf", lambda pdf_path: fake_pdf)
+
+    evaluaciones, _, _ = syllabus_extractor.extraer_evaluaciones_y_ponderaciones_con_pagina_pdf("fake.pdf")
+
+    assert evaluaciones == [
+        {"tipo": "Proyectos", "ponderacion": 80.0, "descripcion": "Impact Project"},
+        {"tipo": "Pruebas", "ponderacion": 20.0, "descripcion": "Examen"},
+    ]
+
+
 def test_extracts_text_between_sections_across_pages(monkeypatch):
     fake_pdf = FakePdf(
         [

@@ -177,20 +177,29 @@ def _categorize_evaluations(evaluations: list[Any]) -> dict[str, dict[str, str]]
         if not isinstance(item, dict):
             continue
         category = _evaluation_category(item)
+        if category not in categories:
+            category = "otro"
         categories[category].append(item)
 
     return {
         key: {
             "weight": _format_weight(sum(_weight(item.get("ponderacion")) for item in items)),
             "count": _format_count(items),
-            "description": "; ".join(_clean(item.get("descripcion")) for item in items if _clean(item.get("descripcion"))),
+            "description": "; ".join(description for item in items if (description := _evaluation_description(item))),
         }
         for key, items in categories.items()
     }
 
 
 def _evaluation_category(item: dict[str, Any]) -> str:
-    text = f"{item.get('tipo') or ''} {item.get('descripcion') or ''}".lower()
+    category = _known_evaluation_category(f"{item.get('categoria') or ''} {item.get('tipo') or ''}")
+    if category:
+        return category
+    return _known_evaluation_category(str(item.get("descripcion") or "")) or "otro"
+
+
+def _known_evaluation_category(text: str) -> str | None:
+    text = text.lower()
     if any(token in text for token in ["examen", "ne"]):
         return "examen"
     if any(token in text for token in ["laboratorio", "laborator", "nl"]):
@@ -201,7 +210,17 @@ def _evaluation_category(item: dict[str, Any]) -> str:
         return "pruebas"
     if any(token in text for token in ["control", "tarea"]):
         return "controles"
-    return "otro"
+    if any(token in text for token in ["otro", "proyecto", "trabajo", "presentacion", "presentación"]):
+        return "otro"
+    return None
+
+
+def _evaluation_description(item: dict[str, Any]) -> str:
+    return (
+        _clean(item.get("descripcion"))
+        or _clean(item.get("tipo"))
+        or _clean(item.get("categoria"))
+    )
 
 
 def _weight(value: Any) -> float:

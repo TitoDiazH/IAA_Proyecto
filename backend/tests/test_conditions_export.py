@@ -104,6 +104,65 @@ def test_build_conditions_export_table_uses_completed_report_normalized_data():
     assert len(table["rows"][0]) == len(table["columns"]) == 19
 
 
+def test_build_conditions_export_table_assigns_unknown_evaluation_to_other():
+    db = make_session()
+    course = CourseGroup(
+        academic_period="202610",
+        year=2026,
+        term="10",
+        course_code="ING1108",
+        career="ING",
+        course_name="Introduccion al Calculo",
+    )
+    db.add(course)
+    db.flush()
+    db.add(
+        Syllabus(
+            course_group_id=course.id,
+            original_filename="202610-ING-ING1108-NRC-7579-INTRODUCCION-AL-CALCULO.pdf",
+            stored_path="/tmp/syllabus.pdf",
+            file_size=100,
+            academic_period="202610",
+            year=2026,
+            term="10",
+            career="ING",
+            course_code="ING1108",
+            nrc="7579",
+            course_name="Introduccion al Calculo",
+            text_content="",
+            extraction_status="ok",
+        )
+    )
+    db.add(
+        AnalysisReport(
+            course_group_id=course.id,
+            status="completed",
+            compared_nrcs=["7579"],
+            summary={
+                "normalized_syllabi_by_nrc": {
+                    "7579": {
+                        "evaluaciones": [
+                            {"tipo": "Proyectos", "ponderacion": 80, "descripcion": "Impact Project"},
+                            {"tipo": "Pruebas", "ponderacion": 20, "descripcion": "Examen"},
+                            {"categoria": "Actividad especial", "ponderacion": 5},
+                        ],
+                        "requisitos_aprobacion": "",
+                        "nota_final": "",
+                    }
+                }
+            },
+            processing_time_seconds=1,
+        )
+    )
+    db.commit()
+
+    table = build_conditions_export_table(db)
+
+    assert table["rows"][0][5:7] == ["20%", "1"]
+    assert table["rows"][0][10:12] == ["85%", "Impact Project; Actividad especial"]
+    assert table["rows"][0][12:14] == ["", ""]
+
+
 def test_conditions_table_to_xlsx_returns_openxml_zip():
     table = {
         "header_rows": [["Curso"], ["Codigo"], ["NRC"]],

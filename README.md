@@ -7,6 +7,19 @@ GEMINI_API_KEY=tu_api_key
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
+Configura también la conexión PostgreSQL de Supabase obtenida desde
+`Connect > Session pooler`:
+
+```bash
+DATABASE_URL=postgresql+psycopg2://postgres.PROJECT_REF:PASSWORD@HOST.pooler.supabase.com:5432/postgres?sslmode=require
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_REEMPLAZAR
+SUPABASE_STORAGE_BUCKET=Syllabus
+```
+
+El bucket debe ser privado y permitir archivos `application/pdf`. La clave
+`SUPABASE_SECRET_KEY` se usa solo en el backend y nunca debe exponerse en Vite.
+
 ## Ejecutar
 
 ```bash
@@ -17,7 +30,6 @@ Servicios:
 
 - Frontend: http://localhost:5173
 - Backend API: http://localhost:8000/api/health
-- PostgreSQL: localhost:5432
 
 La primera ejecución construye las imágenes automáticamente. Si cambias dependencias, usa:
 
@@ -30,7 +42,9 @@ docker compose up --build
 Variables útiles:
 
 - `DATABASE_URL`: conexión SQLAlchemy a PostgreSQL.
-- `STORAGE_DIR`: carpeta interna donde se guardan PDFs.
+- `SUPABASE_URL`: URL del proyecto Supabase.
+- `SUPABASE_SECRET_KEY`: clave privada usada únicamente por el backend.
+- `SUPABASE_STORAGE_BUCKET`: bucket privado donde se guardan los PDFs.
 - `ALLOWED_ORIGINS`: orígenes permitidos por CORS.
 - `MAX_UPLOAD_MB`: tamaño máximo del ZIP.
 - `AI_REQUEST_TIMEOUT_SECONDS`: timeout por llamada a IA. La IA solo compara JSON estructurados.
@@ -61,7 +75,8 @@ El ejemplo contiene tres NRC de Termodinámica. Dos tienen reglas equivalentes c
 
 ## Flujo de análisis
 
-El backend guarda el PDF como respaldo y extrae por código los datos relevantes de cada syllabus. En concreto, prioriza:
+El backend guarda el PDF en el bucket privado de Supabase Storage y usa archivos
+temporales para extraer por código los datos relevantes de cada syllabus. En concreto, prioriza:
 
 - Información general de la asignatura.
 - Evaluaciones y ponderaciones.
@@ -123,7 +138,7 @@ curl http://localhost:8000/api/courses/1/report/latest
 ## Qué guarda la base de datos
 
 - `course_groups`: grupo por año-semestre y código de curso.
-- `syllabi`: metadata extraída, ruta del PDF y texto extraído.
+- `syllabi`: metadata extraída, referencia del objeto en Storage y texto extraído.
 - `analysis_reports`: reporte comparativo por curso.
 - `inconsistencies`: alertas por apartado, variable, NRC, gravedad y sugerencia.
 
