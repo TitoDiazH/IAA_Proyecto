@@ -19,10 +19,11 @@ from app.database import Base
 class CourseGroup(Base):
     __tablename__ = "course_groups"
     __table_args__ = (
-        UniqueConstraint("academic_period", "course_code", name="uq_course_group_period_code"),
+        UniqueConstraint("academic_period", "course_code", "user_id", name="uq_course_group_period_code"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(36), index=True, nullable=True)
     academic_period = Column(String(6), index=True, nullable=False)
     year = Column(Integer, index=True, nullable=False)
     term = Column(String(2), index=True, nullable=False)

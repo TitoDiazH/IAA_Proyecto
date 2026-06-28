@@ -43,13 +43,14 @@ HEADER_ROWS = [
 COLUMNS = HEADER_ROWS[-1]
 
 
-def build_conditions_export_table(db: Session) -> dict[str, Any]:
+def build_conditions_export_table(db: Session, user_id: str) -> dict[str, Any]:
     groups = (
         db.query(CourseGroup)
         .options(
             selectinload(CourseGroup.syllabi),
             selectinload(CourseGroup.reports).selectinload(AnalysisReport.inconsistencies),
         )
+        .filter(CourseGroup.user_id == user_id)
         .order_by(CourseGroup.academic_period.desc(), CourseGroup.course_code.asc())
         .all()
     )

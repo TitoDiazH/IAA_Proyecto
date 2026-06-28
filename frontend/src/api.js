@@ -1,7 +1,27 @@
+import { supabase } from "./supabase";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
+async function getAuthHeader() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
+}
+
 async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, options);
+  const authHeader = await getAuthHeader();
+  const headers = { ...authHeader, ...options.headers };
+
+  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  if (response.status === 401) {
+    await supabase.auth.signOut();
+    return;
+  }
+
   if (!response.ok) {
     let detail = "Error inesperado";
     try {
@@ -42,11 +62,15 @@ export function getConditionsExportTable() {
 }
 
 export async function downloadConditionsExport({ format, filename }) {
+  const authHeader = await getAuthHeader();
   const params = new URLSearchParams({
     format,
     filename: filename || "condiciones-aprobacion",
   });
-  const response = await fetch(`${API_BASE}/exports/conditions/download?${params}`);
+  const response = await fetch(
+    `${API_BASE}/exports/conditions/download?${params}`,
+    { headers: authHeader }
+  );
   if (!response.ok) {
     throw new Error(response.statusText || "No se pudo exportar la tabla");
   }
@@ -60,3 +84,5 @@ export function syllabusDownloadUrl(syllabusId) {
 export function syllabusViewUrl(syllabusId) {
   return `${API_BASE}/courses/syllabi/${syllabusId}/view`;
 }
+
+export { getAuthHeader };

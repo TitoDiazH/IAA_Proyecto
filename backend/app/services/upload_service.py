@@ -25,10 +25,11 @@ from app.services.storage_service import (
 logger = logging.getLogger(__name__)
 
 
-def _get_or_create_course_group(db: Session, parsed) -> CourseGroup:
+def _get_or_create_course_group(db: Session, parsed, user_id: str) -> CourseGroup:
     group = (
         db.query(CourseGroup)
         .filter(
+            CourseGroup.user_id == user_id,
             CourseGroup.academic_period == parsed.academic_period,
             CourseGroup.course_code == parsed.course_code,
         )
@@ -40,6 +41,7 @@ def _get_or_create_course_group(db: Session, parsed) -> CourseGroup:
         return group
 
     group = CourseGroup(
+        user_id=user_id,
         academic_period=parsed.academic_period,
         year=parsed.year,
         term=parsed.term,
@@ -52,7 +54,7 @@ def _get_or_create_course_group(db: Session, parsed) -> CourseGroup:
     return group
 
 
-def process_zip_upload(db: Session, filename: str, content: bytes) -> dict:
+def process_zip_upload(db: Session, filename: str, content: bytes, user_id: str) -> dict:
     settings = get_settings()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -124,7 +126,7 @@ def process_zip_upload(db: Session, filename: str, content: bytes) -> dict:
                     continue
                 uploaded_paths.append(stored_path)
 
-                group = _get_or_create_course_group(db, parsed)
+                group = _get_or_create_course_group(db, parsed, user_id)
                 syllabus = Syllabus(
                     course_group_id=group.id,
                     original_filename=original_name,

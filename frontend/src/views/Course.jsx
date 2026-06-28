@@ -12,18 +12,21 @@ import {
 } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { syllabusDownloadUrl, syllabusViewUrl } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getAuthHeader, syllabusDownloadUrl, syllabusViewUrl } from "../api";
+import { useAuth } from "../contexts/AuthContext";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const PDF_RENDER_SCALE = 1.08;
+const PDF_MIN_RENDER_SCALE = 0.9;
+const PDF_MAX_RENDER_SCALE = 1.38;
 
 const HIGHLIGHT_COLORS = {
-  critica: "rgba(198, 40, 40, 0.30)",
-  crítica: "rgba(198, 40, 40, 0.30)",
-  moderada: "var(--warning-bg)",
-  menor: "rgba(37, 99, 235, 0.24)",
+  critica: "rgba(192, 73, 47, 0.28)",
+  crítica: "rgba(192, 73, 47, 0.28)",
+  moderada: "rgba(224, 160, 48, 0.28)",
+  menor: "rgba(91, 123, 140, 0.28)",
 };
 
 const SYLLABUS_LABELS = {
@@ -620,31 +623,47 @@ function ReportView({ report, onEvidenceSelect }) {
     return acc;
   }, {});
   const sections = Object.entries(bySection);
+  const [openSection, setOpenSection] = useState(null);
+  const severityItems = [
+    ["crítica", "críticas", counts.Crítica ?? counts.critica ?? 0, "sev-critica"],
+    ["moderada", "moderadas", counts.Moderada ?? counts.moderada ?? 0, "sev-moderada"],
+    ["menor", "menores", counts.Menor ?? counts.menor ?? 0, "sev-menor"],
+  ].filter(([, , count]) => count > 0);
+
+  useEffect(() => {
+    setOpenSection(null);
+  }, [report.id]);
 
   return (
     <section className="report">
       <div className="report-header">
-        <h2>Reporte comparativo</h2>
-        <span className="time">{report.processing_time_seconds}s</span>
+        <div className="report-header-copy">
+          <h2>Observaciones</h2>
+          <p>
+            {report.inconsistencies.length} hallazgo
+            {report.inconsistencies.length !== 1 ? "s" : ""} en los syllabus
+          </p>
+        </div>
       </div>
 
-      <div className="severity-summary">
-        <span className="sev-chip sev-critica">
-          Críticas: {counts.Crítica ?? counts.critica ?? 0}
-        </span>
-        <span className="sev-chip sev-moderada">
-          Moderadas: {counts.Moderada ?? counts.moderada ?? 0}
-        </span>
-        <span className="sev-chip sev-menor">
-          Menores: {counts.Menor ?? counts.menor ?? 0}
-        </span>
-      </div>
+      {severityItems.length > 0 && (
+        <div className="severity-summary" aria-label="Resumen por severidad">
+          {severityItems.map(([singular, plural, count, className]) => (
+            <span key={singular} className={`sev-chip ${className}`}>
+              {count} {count === 1 ? singular : plural}
+            </span>
+          ))}
+        </div>
+      )}
 
       {outlier?.nrc && (
         <div className="outlier">
           <AlertTriangle size={17} aria-hidden="true" />
-          NRC {outlier.nrc} se aleja más del patrón del grupo (
-          {outlier.alert_count ?? outlier.alerts ?? "?"} alertas).
+          <span>
+            <strong>NRC {outlier.nrc} requiere atención.</strong>{" "}
+            Se aleja más del patrón del grupo con{" "}
+            {outlier.alert_count ?? outlier.alerts ?? "?"} alertas.
+          </span>
         </div>
       )}
 
@@ -654,34 +673,55 @@ function ReportView({ report, onEvidenceSelect }) {
         </p>
       ) : (
         <div className="report-sections">
-          {sections.map(([section, items]) => (
-            <div key={section} className="report-section-group">
-              <div className="report-section-heading">
-                <div>
-                  <h4 className="report-section-name">{formatSyllabusLabel(section)}</h4>
-                </div>
-                <span className="report-section-count">
-                  {items.length} hallazgo{items.length !== 1 ? "s" : ""}
-                </span>
-              </div>
-              <div className="inconsistency-list">
-                {items.map((item) => (
-                  <InconsistencyCard
-                    key={item.id}
-                    item={item}
-                    onEvidenceSelect={onEvidenceSelect}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+          {sections.map(([section, items]) => {
+            const isOpen = openSection === section;
+            return (
+              <section
+                key={section}
+                className={`report-section-group ${isOpen ? "is-open" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="report-section-heading"
+                  onClick={() =>
+                    setOpenSection((current) => current === section ? null : section)
+                  }
+                  aria-expanded={isOpen}
+                >
+                  <span className="report-section-name">{formatSyllabusLabel(section)}</span>
+                  <span className="report-section-heading-meta">
+                    <span className="report-section-count">
+                      {items.length} hallazgo{items.length !== 1 ? "s" : ""}
+                    </span>
+                    <ChevronDown
+                      size={17}
+                      className={`report-section-chevron ${isOpen ? "is-open" : ""}`}
+                      aria-hidden="true"
+                    />
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="inconsistency-list">
+                    {items.map((item) => (
+                      <InconsistencyCard
+                        key={item.id}
+                        item={item}
+                        onEvidenceSelect={onEvidenceSelect}
+                        outlierNrc={outlier?.nrc}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
 
-function InconsistencyCard({ item, onEvidenceSelect }) {
+function InconsistencyCard({ item, onEvidenceSelect, outlierNrc }) {
   const evidence = normalizeEvidence(item.evidence);
   const [showEvidence, setShowEvidence] = useState(false);
 
@@ -692,7 +732,7 @@ function InconsistencyCard({ item, onEvidenceSelect }) {
   }
 
   return (
-    <div className="inconsistency-card">
+    <div className={`inconsistency-card inconsistency-card--${normalizeSeverity(item.severity)}`}>
       <div className="inconsistency-header">
         <SeverityBadge severity={item.severity} />
         <span className="inconsistency-variable">
@@ -702,9 +742,14 @@ function InconsistencyCard({ item, onEvidenceSelect }) {
           NRC: {item.involved_nrcs.join(", ")}
         </span>
       </div>
-      <p className="inconsistency-diff">{item.difference}</p>
+      <div className="finding-detail">
+        <p className="inconsistency-diff">{item.difference}</p>
+      </div>
       {item.suggestion && (
-        <p className="inconsistency-suggestion">{item.suggestion}</p>
+        <div className="finding-detail finding-detail-suggestion">
+          <span className="finding-label">Acción sugerida</span>
+          <p className="inconsistency-suggestion">{item.suggestion}</p>
+        </div>
       )}
       {evidence.length > 0 && (
         <>
@@ -736,9 +781,9 @@ function InconsistencyCard({ item, onEvidenceSelect }) {
                 >
                   <span className="evidence-meta">
                     <span className="evidence-nrc">NRC {quote.nrc}</span>
-                    {evidenceStatusLabel(quote.matchStatus) && (
-                      <span className={`evidence-status evidence-status-${quote.matchStatus}`}>
-                        {evidenceStatusLabel(quote.matchStatus)}
+                    {outlierNrc && quote.nrc === outlierNrc && (
+                      <span className="evidence-status evidence-status-outlier">
+                        Problemática
                       </span>
                     )}
                   </span>
@@ -807,6 +852,7 @@ function PdfRenderedPage({
   pdfDocument,
   pageNumber,
   pageCount,
+  renderScale,
   highlights,
   activeHighlightId,
   isTargetPage,
@@ -840,7 +886,7 @@ function PdfRenderedPage({
         const page = await pdfDocument.getPage(pageNumber);
         if (cancelled) return;
 
-        const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
+        const viewport = page.getViewport({ scale: renderScale });
         const canvas = canvasRef.current;
         const context = canvas?.getContext("2d");
         if (!canvas || !context) return;
@@ -879,7 +925,7 @@ function PdfRenderedPage({
       cancelled = true;
       renderTask?.cancel?.();
     };
-  }, [pageNumber, pdfDocument]);
+  }, [pageNumber, pdfDocument, renderScale]);
 
   useEffect(() => {
     if (pageState.loading || !pageState.viewport) return;
@@ -990,14 +1036,17 @@ function PdfRenderedPage({
   );
 }
 
-function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutReady }) {
+function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget }) {
+  const { session } = useAuth();
   const [pdfDocument, setPdfDocument] = useState(null);
   const [pageCount, setPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [renderScale, setRenderScale] = useState(PDF_RENDER_SCALE);
   const documentRef = useRef(null);
   const lastScrolledTargetRef = useRef(null);
   const pdfUrl = syllabusViewUrl(syllabus.id);
+  const token = session?.access_token;
 
   const targetPage = Number(jumpTarget?.page) || null;
   const activeHighlightId = jumpTarget?.highlightId || null;
@@ -1014,21 +1063,21 @@ function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutRead
     });
   }
 
-  function markTargetScrolled(pageNumber) {
+  function markTargetScrolled() {
     if (!jumpTarget?.requestedAt) return false;
-    const scrollKey = `${jumpTarget.requestedAt}-${pageNumber}`;
+    const scrollKey = String(jumpTarget.requestedAt);
     if (lastScrolledTargetRef.current === scrollKey) return false;
     lastScrolledTargetRef.current = scrollKey;
     return true;
   }
 
   function handlePageReady(pageNumber) {
-    if (targetPage !== pageNumber || !markTargetScrolled(pageNumber)) return;
+    if (targetPage !== pageNumber || !markTargetScrolled()) return;
     scrollToPage(pageNumber);
   }
 
   function handleFocusedMatch(pageNumber, pageOffset) {
-    if (!markTargetScrolled(pageNumber)) return;
+    if (!markTargetScrolled()) return;
     scrollToPage(pageNumber, pageOffset);
   }
 
@@ -1038,8 +1087,10 @@ function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutRead
     setError(null);
     setPdfDocument(null);
     setPageCount(0);
+    setRenderScale(PDF_RENDER_SCALE);
 
-    const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
+    const httpHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+    const loadingTask = pdfjsLib.getDocument({ url: pdfUrl, httpHeaders });
     loadingTask.promise
       .then((loadedDocument) => {
         if (cancelled) {
@@ -1061,18 +1112,51 @@ function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutRead
       cancelled = true;
       loadingTask.destroy();
     };
-  }, [pdfUrl]);
+  }, [pdfUrl, token]);
 
   useEffect(() => {
-    if (loading || !jumpTarget?.requestedAt) return undefined;
+    const container = documentRef.current;
+    if (!container || !pdfDocument) return undefined;
 
-    const frame = window.requestAnimationFrame(() => onLayoutReady?.());
-    const timeout = window.setTimeout(() => onLayoutReady?.(), 220);
+    let cancelled = false;
+    let frameId = null;
+
+    async function updateScale() {
+      const styles = window.getComputedStyle(container);
+      const horizontalPadding =
+        Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
+      const availableWidth = container.clientWidth - horizontalPadding;
+      if (availableWidth <= 0) return;
+
+      const page = await pdfDocument.getPage(1);
+      if (cancelled) return;
+
+      const baseViewport = page.getViewport({ scale: 1 });
+      const nextScale = Math.min(
+        PDF_MAX_RENDER_SCALE,
+        Math.max(PDF_MIN_RENDER_SCALE, availableWidth / baseViewport.width)
+      );
+
+      setRenderScale((current) =>
+        Math.abs(current - nextScale) < 0.01 ? current : nextScale
+      );
+    }
+
+    function scheduleScaleUpdate() {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(updateScale);
+    }
+
+    const observer = new ResizeObserver(scheduleScaleUpdate);
+    observer.observe(container);
+    scheduleScaleUpdate();
+
     return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
+      cancelled = true;
+      if (frameId) cancelAnimationFrame(frameId);
+      observer.disconnect();
     };
-  }, [jumpTarget?.requestedAt, loading, onLayoutReady]);
+  }, [pdfDocument]);
 
   if (loading) {
     return (
@@ -1095,6 +1179,7 @@ function PdfDocumentViewer({ syllabus, highlights = [], jumpTarget, onLayoutRead
           pdfDocument={pdfDocument}
           pageNumber={index + 1}
           pageCount={pageCount}
+          renderScale={renderScale}
           highlights={highlights}
           activeHighlightId={activeHighlightId}
           isTargetPage={targetPage === index + 1}
@@ -1112,8 +1197,6 @@ function SyllabusPdfViewer({
   onSelect,
   highlights = [],
   jumpTarget,
-  viewerRef,
-  onLayoutReady,
 }) {
   const activeSyllabus = syllabi[activeIndex];
 
@@ -1136,7 +1219,6 @@ function SyllabusPdfViewer({
 
   return (
     <section
-      ref={viewerRef}
       className="syllabus-viewer"
       aria-label="Visor de syllabus del curso"
     >
@@ -1151,42 +1233,24 @@ function SyllabusPdfViewer({
           <ChevronLeft size={20} />
         </button>
 
-        <div className="pdf-panel">
-          <div className="pdf-panel-meta">
-            <div className="pdf-title">
-              <FileText size={18} aria-hidden="true" />
+        <div className={`pdf-panel ${activeHighlights.length ? "has-highlights" : ""}`}>
+          {activeHighlights.length > 0 && (
+            <div className="pdf-highlight-legend" aria-label="Leyenda de resaltados">
               <span>
-                <strong>NRC {activeSyllabus.nrc}</strong>
-                <small>{activeSyllabus.original_filename}</small>
+                <i className="legend-dot legend-dot-critica" />
+                Crítica
               </span>
+              <span>
+                <i className="legend-dot legend-dot-moderada" />
+                Moderada
+              </span>
+              <span>
+                <i className="legend-dot legend-dot-menor" />
+                Menor
+              </span>
+              
             </div>
-            <div className="pdf-links">
-              <span>{formatFileSize(activeSyllabus.file_size)}</span>
-              <a
-                className="pdf-open-link"
-                href={syllabusDownloadUrl(activeSyllabus.id)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <ExternalLink size={15} aria-hidden="true" />
-                Abrir
-              </a>
-            </div>
-          </div>
-          <div className="pdf-highlight-legend" aria-label="Leyenda de resaltados">
-            <span>
-              <i className="legend-dot legend-dot-critica" />
-              Crítica
-            </span>
-            <span>
-              <i className="legend-dot legend-dot-moderada" />
-              Moderada
-            </span>
-            <span>
-              <i className="legend-dot legend-dot-menor" />
-              Menor
-            </span>
-          </div>
+          )}
           <PdfDocumentViewer
             key={activeSyllabus.id}
             syllabus={activeSyllabus}
@@ -1194,7 +1258,6 @@ function SyllabusPdfViewer({
             jumpTarget={
               jumpTarget?.nrc === String(activeSyllabus.nrc) ? jumpTarget : null
             }
-            onLayoutReady={onLayoutReady}
           />
         </div>
 
@@ -1235,28 +1298,11 @@ export default function Course({
   const syllabi = course?.syllabi ?? [];
   const [activeSyllabusIndex, setActiveSyllabusIndex] = useState(0);
   const [quoteJumpTarget, setQuoteJumpTarget] = useState(null);
-  const viewerRef = useRef(null);
   const reportHighlights = useMemo(() => collectReportHighlights(report), [report]);
   const analysisStatus = report?.status || course?.latest_report_status;
   const analysisIsActive = ["queued", "processing"].includes(analysisStatus);
   const analysisFailed = analysisStatus === "failed";
   const reportIsReady = report?.status === "completed";
-
-  const centerPdfViewer = useCallback((behavior = "smooth") => {
-    const viewerElement = viewerRef.current;
-    const targetElement =
-      viewerElement?.querySelector(".pdf-document") ||
-      viewerElement?.querySelector(".pdf-render-state") ||
-      viewerElement?.querySelector(".pdf-panel");
-    if (!targetElement) return;
-
-    const rect = targetElement.getBoundingClientRect();
-    const viewportOffset = Math.max((window.innerHeight - rect.height) / 2, 16);
-    window.scrollTo({
-      top: Math.max(window.scrollY + rect.top - viewportOffset, 0),
-      behavior,
-    });
-  }, []);
 
   useEffect(() => {
     setActiveSyllabusIndex(0);
@@ -1268,20 +1314,6 @@ export default function Course({
       setActiveSyllabusIndex(syllabi.length - 1);
     }
   }, [activeSyllabusIndex, syllabi.length]);
-
-  useEffect(() => {
-    if (!quoteJumpTarget?.requestedAt) return undefined;
-
-    const frame = window.requestAnimationFrame(() => centerPdfViewer());
-    const timeouts = [90, 260, 520].map((delay) =>
-      window.setTimeout(() => centerPdfViewer(), delay)
-    );
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      timeouts.forEach((timeout) => window.clearTimeout(timeout));
-    };
-  }, [activeSyllabusIndex, centerPdfViewer, quoteJumpTarget?.requestedAt]);
 
   function handleEvidenceSelect(quote, item, evidenceIndex) {
     const quoteNrc = String(quote.nrc);
@@ -1303,13 +1335,35 @@ export default function Course({
 
   return (
     <div className="detail-view">
-      {/* Sticky nav */}
-      <nav className="detail-nav">
-        <button className="back-button" onClick={onBack}>
+      <div
+        className="detail-header"
+        style={{
+          "--card-bg": color.bg,
+          "--card-border": color.border,
+          "--card-accent": color.accent,
+        }}
+      >
+        <div className="detail-header-bar" />
+        <button className="back-button detail-header-back" onClick={onBack}>
           <ArrowLeft size={17} />
           Todos los cursos
         </button>
-      </nav>
+
+        {course && (
+          <>
+            <div className="detail-header-content">
+              <h1 className="detail-code">{course.course_name}</h1>
+                <span className="detail-meta">{course.academic_period}</span>
+            </div>
+            <div className="detail-actions">
+              <span className={`analysis-status analysis-status--${analysisStatus || "pending"}`}>
+                {analysisIsActive && <Loader2 className="spin" size={16} />}
+                {analysisStatusLabel(analysisStatus)}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
 
       {loading || !course ? (
         <div className="loading-state detail-loading-state">
@@ -1318,42 +1372,10 @@ export default function Course({
         </div>
       ) : (
         <>
-          {/* Course header */}
-          <div
-            className="detail-header"
-            style={{
-              "--card-bg": color.bg,
-              "--card-border": color.border,
-              "--card-accent": color.accent,
-            }}
-          >
-            <div className="detail-header-bar" />
-            <div className="detail-header-content">
-              <div className="detail-meta">
-                <span>{course.academic_period}</span>
-                <span>{course.career}</span>
-              </div>
-              <h1 className="detail-code">{course.course_name}</h1>
-              <p className="detail-name">{course.course_code}</p>
-            </div>
-            <div className="detail-actions">
-              <span className={`analysis-status analysis-status--${analysisStatus || "pending"}`}>
-                {analysisIsActive && <Loader2 className="spin" size={16} />}
-                {analysisStatusLabel(analysisStatus)}
-              </span>
-            </div>
-          </div>
-
           {/* Body: report + syllabus viewer */}
           <div className="detail-body">
             <main className="detail-main">
-              <SyllabusDocumentSelector
-                syllabi={syllabi}
-                activeIndex={activeSyllabusIndex}
-                onSelect={setActiveSyllabusIndex}
-              />
-
-              <div className="detail-analysis">
+              <aside className="detail-analysis" aria-label="Observaciones del análisis">
                 {analysisIsActive ? (
                   <div className="analyzing-state">
                     <Loader2 className="spin" size={26} />
@@ -1394,17 +1416,23 @@ export default function Course({
                     </p>
                   </div>
                 )}
-              </div>
+              </aside>
 
-              <SyllabusPdfViewer
-                syllabi={syllabi}
-                activeIndex={activeSyllabusIndex}
-                onSelect={setActiveSyllabusIndex}
-                highlights={reportHighlights}
-                jumpTarget={quoteJumpTarget}
-                viewerRef={viewerRef}
-                onLayoutReady={centerPdfViewer}
-              />
+              <section className="detail-document-pane" aria-label="Documento seleccionado">
+                <SyllabusDocumentSelector
+                  syllabi={syllabi}
+                  activeIndex={activeSyllabusIndex}
+                  onSelect={setActiveSyllabusIndex}
+                />
+
+                <SyllabusPdfViewer
+                  syllabi={syllabi}
+                  activeIndex={activeSyllabusIndex}
+                  onSelect={setActiveSyllabusIndex}
+                  highlights={reportHighlights}
+                  jumpTarget={quoteJumpTarget}
+                />
+              </section>
             </main>
           </div>
         </>

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, selectinload
 
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import AnalysisReport, CourseGroup, Syllabus
 from app.schemas import CourseDetail, CourseListItem, ReportRead, SyllabusRead
@@ -25,13 +26,17 @@ def _latest_report(group: CourseGroup) -> AnalysisReport | None:
 
 
 @router.get("", response_model=list[CourseListItem])
-def list_courses(db: Session = Depends(get_db)) -> list[CourseListItem]:
+def list_courses(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> list[CourseListItem]:
     groups = (
         db.query(CourseGroup)
         .options(
             selectinload(CourseGroup.syllabi),
             selectinload(CourseGroup.reports).selectinload(AnalysisReport.inconsistencies),
         )
+        .filter(CourseGroup.user_id == current_user["id"])
         .order_by(CourseGroup.academic_period.desc(), CourseGroup.course_code.asc())
         .all()
     )
@@ -61,11 +66,15 @@ def list_courses(db: Session = Depends(get_db)) -> list[CourseListItem]:
 
 
 @router.get("/{course_id}", response_model=CourseDetail)
-def get_course(course_id: int, db: Session = Depends(get_db)) -> CourseDetail:
+def get_course(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> CourseDetail:
     group = (
         db.query(CourseGroup)
         .options(selectinload(CourseGroup.syllabi), selectinload(CourseGroup.reports))
-        .filter(CourseGroup.id == course_id)
+        .filter(CourseGroup.id == course_id, CourseGroup.user_id == current_user["id"])
         .one_or_none()
     )
     if group is None:
@@ -88,7 +97,16 @@ def get_course(course_id: int, db: Session = Depends(get_db)) -> CourseDetail:
 
 
 @router.post("/{course_id}/analyze", response_model=ReportRead)
-def analyze_course_endpoint(course_id: int, db: Session = Depends(get_db)) -> AnalysisReport:
+def analyze_course_endpoint(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> AnalysisReport:
+    group = db.query(CourseGroup).filter(
+        CourseGroup.id == course_id, CourseGroup.user_id == current_user["id"]
+    ).one_or_none()
+    if group is None:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
     try:
         report = create_queued_analysis_report(db, course_id)
         db.commit()
@@ -100,7 +118,16 @@ def analyze_course_endpoint(course_id: int, db: Session = Depends(get_db)) -> An
 
 
 @router.get("/{course_id}/report/latest", response_model=ReportRead)
-def latest_course_report(course_id: int, db: Session = Depends(get_db)) -> AnalysisReport:
+def latest_course_report(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> AnalysisReport:
+    owned = db.query(CourseGroup.id).filter(
+        CourseGroup.id == course_id, CourseGroup.user_id == current_user["id"]
+    ).scalar()
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
     report = (
         db.query(AnalysisReport)
         .options(selectinload(AnalysisReport.inconsistencies))
@@ -135,8 +162,17 @@ def _pdf_response(syllabus: Syllabus, disposition: str) -> Response:
 
 
 @router.get("/syllabi/{syllabus_id}/download")
-def download_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> Response:
-    syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).one_or_none()
+def download_syllabus(
+    syllabus_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    syllabus = (
+        db.query(Syllabus)
+        .join(CourseGroup, Syllabus.course_group_id == CourseGroup.id)
+        .filter(Syllabus.id == syllabus_id, CourseGroup.user_id == current_user["id"])
+        .one_or_none()
+    )
     if syllabus is None:
         raise HTTPException(status_code=404, detail="Syllabus no encontrado")
 
@@ -144,8 +180,17 @@ def download_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> Respon
 
 
 @router.get("/syllabi/{syllabus_id}/view")
-def view_syllabus(syllabus_id: int, db: Session = Depends(get_db)) -> Response:
-    syllabus = db.query(Syllabus).filter(Syllabus.id == syllabus_id).one_or_none()
+def view_syllabus(
+    syllabus_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    syllabus = (
+        db.query(Syllabus)
+        .join(CourseGroup, Syllabus.course_group_id == CourseGroup.id)
+        .filter(Syllabus.id == syllabus_id, CourseGroup.user_id == current_user["id"])
+        .one_or_none()
+    )
     if syllabus is None:
         raise HTTPException(status_code=404, detail="Syllabus no encontrado")
 

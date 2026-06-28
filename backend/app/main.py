@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db
-from app.routers import courses, exports, reports, uploads
+from app.routers import auth, courses, exports, reports, uploads
 from app.services.analysis_queue import start_analysis_worker
 
 
@@ -27,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(uploads.router)
 app.include_router(courses.router)
 app.include_router(reports.router)

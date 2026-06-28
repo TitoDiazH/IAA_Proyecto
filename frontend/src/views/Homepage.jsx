@@ -432,10 +432,6 @@ export default function Homepage({
             Detecta inconsistencias entre secciones de un mismo curso
           </p>
         </div>
-        <button className="ghost-button" onClick={onRefresh} disabled={loading}>
-          {loading ? <Loader2 className="spin" size={18} /> : <RefreshCcw size={18} />}
-          Actualizar
-        </button>
       </header>
 
       <UploadZone onUploaded={onRefresh} />

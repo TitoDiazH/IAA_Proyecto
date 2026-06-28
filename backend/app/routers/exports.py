@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user
 from app.database import get_db
 from app.schemas import ConditionsExportTable
 from app.services.conditions_export import (
@@ -19,8 +20,11 @@ router = APIRouter(prefix="/api/exports", tags=["exports"])
 
 
 @router.get("/conditions", response_model=ConditionsExportTable)
-def get_conditions_export_table(db: Session = Depends(get_db)) -> dict:
-    return build_conditions_export_table(db)
+def get_conditions_export_table(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    return build_conditions_export_table(db, current_user["id"])
 
 
 @router.get("/conditions/download")
@@ -28,8 +32,9 @@ def download_conditions_export(
     format: str = Query("csv", pattern="^(csv|xlsx)$"),
     filename: str = Query("condiciones-aprobacion"),
     db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ) -> Response:
-    table = build_conditions_export_table(db)
+    table = build_conditions_export_table(db, current_user["id"])
     safe_filename = _safe_filename(filename) or "condiciones-aprobacion"
 
     if format == "csv":

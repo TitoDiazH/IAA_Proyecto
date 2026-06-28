@@ -6,6 +6,8 @@ import {
   getLatestReport,
   listCourses,
 } from "./api";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import Login from "./views/Login";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
 
@@ -44,7 +46,9 @@ function updateBrowserRoute(route, { replace = false } = {}) {
   window.history[method](null, "", nextPath);
 }
 
-export default function App() {
+function AppContent() {
+  const { user, loading, signOut } = useAuth();
+
   const [route, setRoute] = useState(parseRoute);
   const [courses, setCourses] = useState([]);
   const [exportTable, setExportTable] = useState(null);
@@ -130,6 +134,7 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!user) return;
     const initialRoute = parseRoute();
     setRoute(initialRoute);
     updateBrowserRoute(initialRoute, { replace: true });
@@ -154,7 +159,7 @@ export default function App() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const hasActiveAnalysis = courses.some((course) =>
@@ -188,8 +193,23 @@ export default function App() {
     return () => window.clearInterval(interval);
   }, [activeCourse, report?.status, route.view]);
 
+  if (loading) {
+    return <div className="auth-loading">Cargando…</div>;
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
   return (
     <div className="app-shell">
+      <div className="user-bar">
+        <span className="user-bar-email">{user.email}</span>
+        <button type="button" className="ghost-button user-bar-logout" onClick={signOut}>
+          Cerrar sesión
+        </button>
+      </div>
+
       {error && (
         <div className="global-error">
           <p className="message error">{error}</p>
@@ -215,5 +235,13 @@ export default function App() {
         />
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
