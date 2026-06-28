@@ -421,6 +421,7 @@ a {
 .upload-zone {
   background: var(--color-surface);
   border: 1.5px dashed #D4D3CE;
+  cursor: pointer;
   border-radius: var(--radius-xl);
   padding: var(--space-8);
   margin-bottom: var(--space-12);
@@ -432,9 +433,15 @@ a {
 }
 
 .upload-zone:focus-within,
-.upload-zone:hover {
+.upload-zone:hover,
+.upload-zone--drag-active {
   border-color: var(--color-primary);
   box-shadow: var(--shadow-sm);
+}
+
+.upload-zone--drag-active {
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  border-style: solid;
 }
 
 .upload-zone-inner {
@@ -1411,9 +1418,33 @@ a {
   height: auto;
 }
 
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pdf-text-layer span,
+.pdf-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-text-layer ::selection {
+  background: rgba(0, 100, 220, 0.25);
+  color: transparent;
+}
+
 .pdf-highlight-layer {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   pointer-events: none;
 }
 

@@ -209,6 +209,18 @@ function normalizeForMatch(value) {
     .trim();
 }
 
+// Tokenizer for fuzzy matching \u2014 only keeps words \u22653 chars, ignores punctuation
+function tokenizeForOverlap(text) {
+  return String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length >= 3);
+}
+
 function collectReportHighlights(report) {
   if (!report?.inconsistencies?.length) return [];
 
@@ -293,7 +305,7 @@ function findMatchingTextRectsInSegments(pageSegments, quoteText, pageNumber = n
     let windowText = "";
     const mappings = [];
 
-    for (let end = start; end < itemTexts.length && mappings.length < 80; end += 1) {
+    for (let end = start; end < itemTexts.length && mappings.length < 150; end += 1) {
       const itemText = itemTexts[end];
       if (!itemText) continue;
 
@@ -322,7 +334,7 @@ function findMatchingTextRectsInSegments(pageSegments, quoteText, pageNumber = n
         if (rects.length) return rects;
       }
 
-      if (windowText.length > quote.length * 1.8 + 40) {
+      if (windowText.length > quote.length * 3 + 100) {
         break;
       }
     }
@@ -332,7 +344,7 @@ function findMatchingTextRectsInSegments(pageSegments, quoteText, pageNumber = n
     let windowText = "";
     const mappings = [];
 
-    for (let end = start; end < itemTexts.length && mappings.length < 80; end += 1) {
+    for (let end = start; end < itemTexts.length && mappings.length < 150; end += 1) {
       const itemText = itemTexts[end];
       if (!itemText) continue;
 
@@ -357,13 +369,56 @@ function findMatchingTextRectsInSegments(pageSegments, quoteText, pageNumber = n
         if (rects.length) return rects;
       }
 
-      if (windowText.length > quote.length * 1.8 + 40) {
+      if (windowText.length > quote.length * 3 + 100) {
         break;
       }
     }
   }
 
   return [];
+}
+
+// Fallback matcher: finds the window of text items with highest token overlap with the quote.
+// Handles multi-line, cross-page, and slightly-reformatted citations where exact matching fails.
+// Per-item order-independent matcher.
+// Scores each PDF text item on the target page independently — immune to extraction-order
+// issues (formulas, text-boxes, multi-column layouts where items aren't in reading order).
+// Returns rects for items whose text is either a substring of the quote or has strong
+// token overlap with the quote.
+function findByTokenOverlap(pageSegments, quoteText, pageNumber = null) {
+  const quoteTokens = tokenizeForOverlap(quoteText);
+  if (quoteTokens.length < 3) return [];
+
+  const quoteSet = new Set(quoteTokens);
+  const normalizedQuote = normalizeForMatch(quoteText);
+
+  // Only evaluate items on the target page; si.text is already normalizeForMatch(item.str)
+  const pageItems = createSearchItems(pageSegments).filter(
+    (si) =>
+      (pageNumber === null || si.pageNumber === pageNumber) &&
+      si.item &&
+      si.viewport &&
+      si.text.length > 0
+  );
+  if (pageItems.length === 0) return [];
+
+  const matched = pageItems.filter(({ text }) => {
+    // Token-overlap check: item must have ≥3 qualifying tokens AND ≥75% of them in the quote.
+    // Requiring ≥3 tokens prevents short coincidental matches like "NC es promedio de controles"
+    // (only 2 meaningful tokens) from matching spuriously.
+    const tokens = tokenizeForOverlap(text);
+    if (tokens.length >= 3) {
+      const hits = tokens.filter((t) => quoteSet.has(t)).length;
+      if (hits / tokens.length >= 0.75) return true;
+    }
+    // Normalized-substring check: item's full text is a contiguous part of the quote.
+    // Min 10 chars to avoid noise from very short phrases that appear in many contexts.
+    if (text.length >= 10 && normalizedQuote.includes(text)) return true;
+    return false;
+  });
+
+  // Require at least 2 matched items to suppress spurious single-item false positives
+  return matched.length >= 2 ? matched.map(({ item, viewport }) => textItemToRect(item, viewport)) : [];
 }
 
 function rectsFromEvidence(highlight) {
@@ -592,13 +647,33 @@ function buildHighlightRects(
     const structuredIndexes = highlight.evaluationRows?.length
       ? findEvaluationRowItemIndexes(textItems, viewport, highlight.evaluationRows)
       : [];
-    const matchedRects = structuredIndexes.length
+    const matchText = highlight.matchText || highlight.text;
+    const exactRects = structuredIndexes.length
       ? structuredIndexes.map((itemIndex) => textItemToRect(textItems[itemIndex], viewport))
-      : findMatchingTextRectsInSegments(
-          searchableSegments,
-          highlight.matchText || highlight.text,
-          pageNumber
-        );
+      : findMatchingTextRectsInSegments(searchableSegments, matchText, pageNumber);
+    const fuzzyRects = findByTokenOverlap(searchableSegments, matchText, pageNumber);
+    // Merge: keep all exact rects; add fuzzy rects for text lines that exact missed.
+    // Proximity guard: only extend into fuzzy territory within a vertical window of the
+    // known exact region, so unrelated sections further down the page are not pulled in.
+    let matchedRects;
+    if (exactRects.length === 0) {
+      matchedRects = fuzzyRects;
+    } else if (fuzzyRects.length === 0) {
+      matchedRects = exactRects;
+    } else {
+      const firstTop = Math.min(...exactRects.map((r) => r.top));
+      const lastTop = Math.max(...exactRects.map((r) => r.top));
+      const avgH = exactRects.reduce((s, r) => s + (r.height || 12), 0) / exactRects.length;
+      // Budget: citation's known vertical span + 14 average line heights of slack
+      const budget = Math.max(lastTop - firstTop, avgH) + avgH * 14;
+      const extraFuzzy = fuzzyRects.filter(
+        (fr) =>
+          fr.top >= firstTop - avgH * 3 &&
+          fr.top <= lastTop + budget &&
+          !exactRects.some((er) => Math.abs(er.top - fr.top) < 5)
+      );
+      matchedRects = [...exactRects, ...extraFuzzy];
+    }
 
     return matchedRects.map((rect, rectIndex) => ({
       ...rect,
@@ -707,7 +782,6 @@ function ReportView({ report, onEvidenceSelect }) {
                         key={item.id}
                         item={item}
                         onEvidenceSelect={onEvidenceSelect}
-                        outlierNrc={outlier?.nrc}
                       />
                     ))}
                   </div>
@@ -721,7 +795,7 @@ function ReportView({ report, onEvidenceSelect }) {
   );
 }
 
-function InconsistencyCard({ item, onEvidenceSelect, outlierNrc }) {
+function InconsistencyCard({ item, onEvidenceSelect }) {
   const evidence = normalizeEvidence(item.evidence);
   const [showEvidence, setShowEvidence] = useState(false);
 
@@ -781,7 +855,7 @@ function InconsistencyCard({ item, onEvidenceSelect, outlierNrc }) {
                 >
                   <span className="evidence-meta">
                     <span className="evidence-nrc">NRC {quote.nrc}</span>
-                    {outlierNrc && quote.nrc === outlierNrc && (
+                    {item.involved_nrcs?.includes(String(quote.nrc)) && (
                       <span className="evidence-status evidence-status-outlier">
                         Problemática
                       </span>
@@ -860,11 +934,13 @@ function PdfRenderedPage({
   onFocusedMatch,
 }) {
   const canvasRef = useRef(null);
+  const textLayerRef = useRef(null);
   const [pageState, setPageState] = useState({
     loading: true,
     width: 0,
     height: 0,
     textItems: [],
+    textContent: null,
     viewport: null,
     rects: [],
   });
@@ -903,6 +979,7 @@ function PdfRenderedPage({
           width: viewport.width,
           height: viewport.height,
           textItems: textContent.items,
+          textContent,
           viewport,
           rects: [],
         });
@@ -998,6 +1075,27 @@ function PdfRenderedPage({
     pageState.viewport,
   ]);
 
+  useEffect(() => {
+    const container = textLayerRef.current;
+    if (!container || !pageState.textContent || !pageState.viewport) return;
+
+    container.replaceChildren();
+    let task;
+    try {
+      task = pdfjsLib.renderTextLayer({
+        textContentSource: pageState.textContent,
+        container,
+        viewport: pageState.viewport,
+      });
+      task.promise?.catch(() => {});
+    } catch {
+      // renderTextLayer unavailable in this build
+    }
+    return () => {
+      task?.cancel?.();
+    };
+  }, [pageState.textContent, pageState.viewport]);
+
   return (
     <div
       data-page-number={pageNumber}
@@ -1013,6 +1111,7 @@ function PdfRenderedPage({
         </div>
       )}
       <canvas ref={canvasRef} className="pdf-canvas" />
+      <div ref={textLayerRef} className="pdf-text-layer" />
       <div className="pdf-highlight-layer" aria-hidden="true">
         {pageState.rects.map((rect) => (
           <span

@@ -37,6 +37,9 @@ function UploadZone({ onUploaded }) {
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState([]);
   const [errors, setErrors] = useState([]);
+  const [dragActive, setDragActive] = useState(false);
+  const dragCounter = useRef(0);
+  const inputRef = useRef(null);
 
   function addFiles(selected) {
     setFiles((prev) => {
@@ -47,6 +50,40 @@ function UploadZone({ onUploaded }) {
 
   function removeFile(index) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleDragEnter(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setDragActive(true);
+    }
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) {
+      setDragActive(false);
+    }
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    dragCounter.current = 0;
+    const dropped = Array.from(e.dataTransfer.files).filter(
+      (f) => f.type === "application/zip" || f.name.endsWith(".zip")
+    );
+    if (dropped.length > 0) addFiles(dropped);
   }
 
   async function handleSubmit(event) {
@@ -74,8 +111,20 @@ function UploadZone({ onUploaded }) {
 
   const allRejected = results.flatMap((r) => r.rejected_files || []);
 
+  function handleZoneClick(e) {
+    if (e.target.closest("label, button, input, a")) return;
+    inputRef.current?.click();
+  }
+
   return (
-    <div className="upload-zone">
+    <div
+      className={`upload-zone${dragActive ? " upload-zone--drag-active" : ""}`}
+      onClick={handleZoneClick}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <div className="upload-zone-inner">
         <FileArchive size={26} className="upload-zone-icon" aria-hidden="true" />
         <div className="upload-zone-text">
@@ -83,6 +132,7 @@ function UploadZone({ onUploaded }) {
           <label className="upload-link">
             selecciona archivos
             <input
+              ref={inputRef}
               type="file"
               accept=".zip,application/zip"
               multiple
