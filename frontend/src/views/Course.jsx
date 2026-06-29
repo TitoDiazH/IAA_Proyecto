@@ -80,7 +80,9 @@ function formatSyllabusLabel(value) {
     .replace(/_/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 // ─── Shared: Severity badge ──────────────────────────────────────────────────
