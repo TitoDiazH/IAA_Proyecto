@@ -171,6 +171,29 @@ function UploadZone({ onUploaded, onToast }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SKELETON CARD
+// ═══════════════════════════════════════════════════════════════════════════════
+function SkeletonCard() {
+  return (
+    <div className="course-card skeleton-card" aria-hidden="true">
+      <div className="card-top-bar sk sk-bar" />
+      <div className="card-body">
+        <div className="sk sk-line sk-title" />
+        <div className="sk sk-line sk-subtitle" />
+        <div className="card-meta">
+          <div className="sk sk-chip" />
+          <div className="sk sk-chip" />
+        </div>
+      </div>
+      <div className="card-footer">
+        <div className="sk sk-chip" />
+        <div className="sk sk-chip" />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // COURSE CARD
 // ═══════════════════════════════════════════════════════════════════════════════
 function CourseCard({ course, onClick }) {
@@ -462,9 +485,10 @@ export default function Homepage({
         </div>
 
         {loading && courses.length === 0 ? (
-          <div className="loading-state">
-            <Loader2 className="spin" size={28} />
-            <p>Cargando cursos…</p>
+          <div className="course-grid" aria-busy="true" aria-label="Cargando cursos">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
           </div>
         ) : courses.length === 0 ? (
           <div className="empty-state">

@@ -964,6 +964,79 @@ a {
   flex: 0 0 auto;
 }
 
+/* ─── Skeleton shimmer ──────────────────────────────────────────────────────── */
+@keyframes sk-shimmer {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(100%); }
+  100% { transform: translateX(100%); }
+}
+
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: #C8C8C6;
+  border-radius: var(--radius-xs);
+}
+
+.sk::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 100%
+  );
+  animation: sk-shimmer 1.8s linear infinite;
+  will-change: transform;
+}
+
+.skeleton-card {
+  pointer-events: none;
+  cursor: default;
+  box-shadow: var(--shadow-xs);
+  border-color: #E8E8E6;
+  background: #FAFAF9;
+}
+
+.sk-bar {
+  border-radius: 0;
+}
+
+.sk-line {
+  height: 1rem;
+  margin-bottom: var(--space-2);
+}
+
+.sk-title {
+  width: 68%;
+  height: 1.375rem;
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.sk-subtitle {
+  width: 42%;
+  height: 0.875rem;
+  margin-bottom: var(--space-5);
+}
+
+.sk-chip {
+  height: 1.625rem;
+  width: 5.25rem;
+  border-radius: 999px;
+}
+
+.skeleton-card .card-footer {
+  background: rgba(0, 0, 0, 0.025);
+  border-top-color: #E8E8E6;
+  gap: var(--space-2);
+}
+
 .analysis-status {
   display: inline-flex;
   align-items: center;
@@ -2420,6 +2493,12 @@ th {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* Skeleton loaders need animation to signal loading state */
+  .sk::after {
+    animation-duration: 1.8s !important;
+    animation-iteration-count: infinite !important;
   }
 
   .spin {
