@@ -1,3 +1,4 @@
+import { BookOpen } from "lucide-react";
 import { useState } from "react";
 import { supabase } from "../supabase";
 const campusImage = "/campus.webp";
@@ -62,8 +63,11 @@ export default function Login() {
     <div className="auth-page" style={{ backgroundImage: `url(${campusImage})` }}>
       <div className="auth-card">
         <div className="auth-header">
+          <div className="auth-logo" aria-hidden="true">
+            <BookOpen size={22} />
+          </div>
           <h1 className="auth-title">Revisor de Syllabus</h1>
-          <p className="auth-subtitle">Universidad de los Andes</p>
+          <span className="auth-subtitle">Universidad de los Andes</span>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
