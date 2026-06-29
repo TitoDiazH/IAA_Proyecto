@@ -6,7 +6,6 @@ import {
   FileArchive,
   FileText,
   Loader2,
-  RefreshCcw,
   Upload,
   X,
 } from "lucide-react";
@@ -32,11 +31,9 @@ function courseColor(id) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // UPLOAD ZONE  (supports multiple files)
 // ═══════════════════════════════════════════════════════════════════════════════
-function UploadZone({ onUploaded }) {
+function UploadZone({ onUploaded, onToast }) {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [results, setResults] = useState([]);
-  const [errors, setErrors] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0);
   const inputRef = useRef(null);
@@ -90,26 +87,21 @@ function UploadZone({ onUploaded }) {
     event.preventDefault();
     if (!files.length) return;
     setUploading(true);
-    setResults([]);
-    setErrors([]);
-    const newResults = [];
-    const newErrors = [];
     for (const file of files) {
       try {
         const res = await uploadZip(file);
-        newResults.push(res);
+        onToast?.("ok", res.message);
+        (res.rejected_files || []).forEach((item) =>
+          onToast?.("warn", `${item.filename}: ${item.reason}`)
+        );
       } catch (exc) {
-        newErrors.push(`${file.name}: ${exc.message}`);
+        onToast?.("error", `${file.name}: ${exc.message}`);
       }
     }
-    setResults(newResults);
-    setErrors(newErrors);
     setFiles([]);
     setUploading(false);
     await onUploaded();
   }
-
-  const allRejected = results.flatMap((r) => r.rejected_files || []);
 
   function handleZoneClick(e) {
     if (e.target.closest("label, button, input, a")) return;
@@ -173,26 +165,6 @@ function UploadZone({ onUploaded }) {
               : `Subir ${files.length} archivo${files.length !== 1 ? "s" : ""}`}
           </button>
         </form>
-      )}
-
-      {(results.length > 0 || errors.length > 0) && (
-        <div className="upload-feedback">
-          {results.map((res, i) => (
-            <p key={i} className="message ok">
-              {res.message}
-            </p>
-          ))}
-          {allRejected.map((item) => (
-            <p key={`${item.filename}-${item.reason}`} className="message warn">
-              <strong>{item.filename}</strong>: {item.reason}
-            </p>
-          ))}
-          {errors.map((e, i) => (
-            <p key={i} className="message error">
-              {e}
-            </p>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -472,10 +444,11 @@ export default function Homepage({
   loading,
   onOpenCourse,
   onRefresh,
+  addToast,
 }) {
   return (
     <div className="home-view">
-      <UploadZone onUploaded={onRefresh} />
+      <UploadZone onUploaded={onRefresh} onToast={addToast} />
 
       <div className="courses-section">
         <div className="courses-section-header">

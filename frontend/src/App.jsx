@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpen } from "lucide-react";
+import { ArrowLeft, BookOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   analyzeCourse,
@@ -14,6 +14,8 @@ import Homepage from "./views/Homepage";
 
 const HOME_CACHE_KEY = "iaa_home_v1";
 const COURSE_CACHE_KEY = "iaa_course_v1";
+const TOAST_DURATION_MS = 7000;
+const TOAST_FADE_DURATION_MS = 300;
 
 function readHomeCache() {
   try {
@@ -52,6 +54,31 @@ function clearAllCache() {
     localStorage.removeItem(HOME_CACHE_KEY);
     localStorage.removeItem(COURSE_CACHE_KEY);
   } catch {}
+}
+
+function ToastContainer({ toasts, onDismiss }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-container" aria-live="polite">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`toast toast-${toast.type}${toast.isExiting ? " toast-exiting" : ""}`}
+          role="alert"
+        >
+          <span className="toast-message">{toast.message}</span>
+          <button
+            type="button"
+            className="toast-close"
+            onClick={() => onDismiss(toast.id)}
+            aria-label="Cerrar"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function AppNav({ user, isHome, onBack, signOut }) {
@@ -136,6 +163,24 @@ function AppContent() {
   });
   const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [error, setError] = useState(null);
+  const [toasts, setToasts] = useState([]);
+
+  function addToast(type, message) {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, type, message, isExiting: false }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.map((toast) => (
+        toast.id === id ? { ...toast, isExiting: true } : toast
+      )));
+    }, TOAST_DURATION_MS);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, TOAST_DURATION_MS + TOAST_FADE_DURATION_MS);
+  }
+
+  function dismissToast(id) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
 
   async function refreshCourses() {
     setLoadingCourses(true);
@@ -296,6 +341,8 @@ function AppContent() {
         signOut={() => { clearAllCache(); signOut(); }}
       />
 
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       {error && (
         <div className="global-error">
           <p className="message error">{error}</p>
@@ -309,6 +356,7 @@ function AppContent() {
           loading={loadingCourses}
           onOpenCourse={openCourse}
           onRefresh={refreshCourses}
+          addToast={addToast}
         />
       ) : (
         <Course
