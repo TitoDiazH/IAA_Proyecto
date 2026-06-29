@@ -988,11 +988,10 @@ a {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 252, 0.28) 50%,
     transparent 100%
   );
   animation: sk-shimmer 1.8s linear infinite;
-  will-change: transform;
 }
 
 .skeleton-card {
