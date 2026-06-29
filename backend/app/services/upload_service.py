@@ -6,12 +6,12 @@ from pathlib import Path
 from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.models import CourseGroup, Syllabus
 from app.services.analysis_queue import enqueue_report_analysis
-from app.services.filename_parser import FilenameParseError, parse_syllabus_filename, slugify_filename
+from app.services.filename_parser import FilenameParseError, normalize_course_name, parse_syllabus_filename, slugify_filename
 from app.services.pdf_extractor import extract_pdf_text
 from app.services.report_service import create_queued_analysis_report
 from app.services.storage_service import (
@@ -165,11 +165,38 @@ def process_zip_upload(db: Session, filename: str, content: bytes, user_id: str)
     for report_id in queued_report_ids:
         enqueue_report_analysis(report_id)
 
+    # Fetch affected course groups so the frontend can show cards immediately
+    affected_groups = (
+        db.query(CourseGroup)
+        .options(selectinload(CourseGroup.syllabi), selectinload(CourseGroup.reports))
+        .filter(CourseGroup.id.in_(sorted(course_ids)))
+        .all()
+    )
+    courses_data = []
+    for group in sorted(affected_groups, key=lambda g: (g.academic_period, g.course_code)):
+        latest = max(group.reports, key=lambda r: r.created_at) if group.reports else None
+        courses_data.append({
+            "id": group.id,
+            "academic_period": group.academic_period,
+            "year": group.year,
+            "term": group.term,
+            "career": group.career,
+            "course_code": group.course_code,
+            "course_name": normalize_course_name(group.course_name),
+            "syllabus_count": len(group.syllabi),
+            "latest_report_id": latest.id if latest else None,
+            "latest_report_status": latest.status if latest else None,
+            "latest_report_inconsistency_count": None,
+            "created_at": group.created_at,
+            "updated_at": group.updated_at,
+        })
+
     return {
         "accepted_count": accepted,
         "rejected_count": len(rejected),
         "rejected_files": rejected,
         "course_ids": sorted(course_ids),
+        "courses": courses_data,
         "queued_report_ids": queued_report_ids,
         "message": f"Se cargaron {accepted} syllabus PDF y se encolaron {len(queued_report_ids)} análisis",
     }

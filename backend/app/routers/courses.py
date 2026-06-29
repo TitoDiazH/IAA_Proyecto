@@ -12,7 +12,7 @@ from app.schemas import CourseDetail, CourseListItem, ReportRead, SyllabusRead
 from app.services.analysis_queue import enqueue_report_analysis
 from app.services.filename_parser import normalize_course_name
 from app.services.report_service import create_queued_analysis_report
-from app.services.storage_service import StorageError, download_pdf
+from app.services.storage_service import StorageError, delete_pdf, download_pdf
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -94,6 +94,29 @@ def get_course(
         latest_report_id=latest.id if latest else None,
         latest_report_status=latest.status if latest else None,
     )
+
+
+@router.delete("/{course_id}", status_code=204)
+def delete_course(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> None:
+    group = (
+        db.query(CourseGroup)
+        .options(selectinload(CourseGroup.syllabi))
+        .filter(CourseGroup.id == course_id, CourseGroup.user_id == current_user["id"])
+        .one_or_none()
+    )
+    if group is None:
+        raise HTTPException(status_code=404, detail="Curso no encontrado")
+    for syllabus in group.syllabi:
+        try:
+            delete_pdf(syllabus.stored_path)
+        except StorageError as exc:
+            logger.warning("Could not delete PDF for syllabus %s: %s", syllabus.id, exc)
+    db.delete(group)
+    db.commit()
 
 
 @router.post("/{course_id}/analyze", response_model=ReportRead)

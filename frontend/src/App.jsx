@@ -1,7 +1,8 @@
 import { ArrowLeft, BookOpen, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   analyzeCourse,
+  deleteCourse,
   getConditionsExportTable,
   getCourse,
   getLatestReport,
@@ -164,6 +165,9 @@ function AppContent() {
   const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [error, setError] = useState(null);
   const [toasts, setToasts] = useState([]);
+  // Track in-flight deletes so refreshCourses() can't restore them from stale API data.
+  const pendingDeleteIds = useRef(new Set());         // Set<String(courseId)>
+  const pendingDeleteCodes = useRef(new Map());       // Map<course_code, refCount>
 
   function addToast(type, message) {
     const id = Date.now() + Math.random();
@@ -182,22 +186,64 @@ function AppContent() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
-  async function refreshCourses() {
-    setLoadingCourses(true);
-    setError(null);
-    try {
-      const [data, table] = await Promise.all([
-        listCourses(),
-        getConditionsExportTable(),
-      ]);
-      setCourses(data);
-      setExportTable(table);
-      writeHomeCache(data, table);
-    } catch (exc) {
-      setError(exc.message);
-    } finally {
-      setLoadingCourses(false);
+  async function refreshCourses(uploadResult = null) {
+    // If the upload response includes course data, show cards immediately
+    if (uploadResult?.courses?.length > 0) {
+      setCourses((prev) => {
+        const map = new Map(prev.map((c) => [c.id, c]));
+        for (const c of uploadResult.courses) map.set(c.id, c);
+        return [...map.values()].sort((a, b) => {
+          const p = b.academic_period.localeCompare(a.academic_period);
+          return p !== 0 ? p : a.course_code.localeCompare(b.course_code);
+        });
+      });
     }
+
+    if (!uploadResult) setLoadingCourses(true);
+    setError(null);
+    let freshCourses = null;
+    try {
+      freshCourses = await listCourses();
+      // Filter out courses whose delete is still in flight to avoid restoring them
+      const visible = pendingDeleteIds.current.size
+        ? freshCourses.filter((c) => !pendingDeleteIds.current.has(String(c.id)))
+        : freshCourses;
+      setCourses(visible);
+      writeHomeCache(visible, exportTable);
+    } catch (exc) {
+      if (!uploadResult) setError(exc.message);
+      setLoadingCourses(false);
+      return;
+    }
+    setLoadingCourses(false);
+    // export table is secondary — failure must not block course display
+    try {
+      const table = await getConditionsExportTable();
+      // Filter out rows for courses whose delete is still in flight
+      const filteredTable = pendingDeleteCodes.current.size
+        ? { ...table, rows: table.rows.filter((r) => !pendingDeleteCodes.current.has(r[1])), get row_count() { return this.rows.length; } }
+        : table;
+      setExportTable(filteredTable);
+      writeHomeCache(freshCourses, filteredTable);
+    } catch {
+      // silent — export table is best-effort
+    }
+  }
+
+  function _addPendingCode(code) {
+    pendingDeleteCodes.current.set(code, (pendingDeleteCodes.current.get(code) ?? 0) + 1);
+  }
+  function _removePendingCode(code) {
+    const n = pendingDeleteCodes.current.get(code) ?? 0;
+    if (n <= 1) pendingDeleteCodes.current.delete(code);
+    else pendingDeleteCodes.current.set(code, n - 1);
+  }
+
+  function _filterExportTable(table, codes) {
+    if (!table?.rows?.length || !codes.length) return table;
+    const codeSet = new Set(codes);
+    const rows = table.rows.filter((r) => !codeSet.has(r[1]));
+    return { ...table, rows, row_count: rows.length };
   }
 
   async function loadCourse(courseId) {
@@ -244,6 +290,84 @@ function AppContent() {
     setActiveCourse(null);
     setReport(null);
     refreshCourses();
+  }
+
+  function handleDeleteCourse(courseId) {
+    const key = String(courseId);
+    const removed = courses.find((c) => String(c.id) === key);
+    const code = removed?.course_code;
+
+    pendingDeleteIds.current.add(key);
+    if (code) _addPendingCode(code);
+
+    const updatedCourses = courses.filter((c) => String(c.id) !== key);
+    const updatedTable = _filterExportTable(exportTable, code ? [code] : []);
+    setCourses(updatedCourses);
+    if (updatedTable !== exportTable) setExportTable(updatedTable);
+    writeHomeCache(updatedCourses, updatedTable);
+    localStorage.removeItem(COURSE_CACHE_KEY);
+
+    deleteCourse(courseId)
+      .then(() => addToast("ok", "Curso eliminado correctamente"))
+      .catch((exc) => {
+        if (removed) {
+          setCourses((prev) => {
+            const ids = new Set(prev.map((c) => String(c.id)));
+            return ids.has(key) ? prev : [...prev, removed];
+          });
+        }
+        addToast("error", exc.message);
+      })
+      .finally(() => {
+        pendingDeleteIds.current.delete(key);
+        if (code) _removePendingCode(code);
+      });
+  }
+
+  function handleDeleteMany(courseIds) {
+    const idSet = new Set(courseIds.map(String));
+    const removedMap = new Map(
+      courses.filter((c) => idSet.has(String(c.id))).map((c) => [String(c.id), c])
+    );
+    const deletedCodes = [...removedMap.values()].map((c) => c.course_code).filter(Boolean);
+
+    idSet.forEach((id) => pendingDeleteIds.current.add(id));
+    deletedCodes.forEach((code) => _addPendingCode(code));
+
+    const updatedCourses = courses.filter((c) => !idSet.has(String(c.id)));
+    const updatedTable = _filterExportTable(exportTable, deletedCodes);
+    setCourses(updatedCourses);
+    if (updatedTable !== exportTable) setExportTable(updatedTable);
+    writeHomeCache(updatedCourses, updatedTable);
+    localStorage.removeItem(COURSE_CACHE_KEY);
+
+    Promise.allSettled(courseIds.map((id) => deleteCourse(id))).then((results) => {
+      const failedIds = courseIds.filter((_, i) => results[i].status === "rejected").map(String);
+      const succeededIds = courseIds.filter((_, i) => results[i].status === "fulfilled").map(String);
+
+      succeededIds.forEach((id) => {
+        pendingDeleteIds.current.delete(id);
+        const code = removedMap.get(id)?.course_code;
+        if (code) _removePendingCode(code);
+      });
+
+      if (failedIds.length > 0) {
+        const toRestore = failedIds.map((id) => removedMap.get(id)).filter(Boolean);
+        failedIds.forEach((id) => {
+          pendingDeleteIds.current.delete(id);
+          const code = removedMap.get(id)?.course_code;
+          if (code) _removePendingCode(code);
+        });
+        setCourses((prev) => {
+          const existing = new Set(prev.map((c) => String(c.id)));
+          return [...prev, ...toRestore.filter((c) => !existing.has(String(c.id)))];
+        });
+        addToast("error", `${failedIds.length} curso${failedIds.length !== 1 ? "s" : ""} no pudo eliminarse`);
+      }
+
+      const n = succeededIds.length;
+      if (n > 0) addToast("ok", `${n} curso${n !== 1 ? "s" : ""} eliminado${n !== 1 ? "s" : ""}`);
+    });
   }
 
   async function handleAnalyze() {
@@ -356,6 +480,8 @@ function AppContent() {
           loading={loadingCourses}
           onOpenCourse={openCourse}
           onRefresh={refreshCourses}
+          onDeleteCourse={handleDeleteCourse}
+          onDeleteMany={handleDeleteMany}
           addToast={addToast}
         />
       ) : (

@@ -47,6 +47,18 @@ export function analyzeCourse(courseId) {
   return request(`/courses/${courseId}/analyze`, { method: "POST" });
 }
 
+export async function deleteCourse(courseId) {
+  const authHeader = await getAuthHeader();
+  const res = await fetch(`${API_BASE}/courses/${courseId}`, {
+    method: "DELETE",
+    headers: authHeader,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Error al eliminar el curso");
+  }
+}
+
 export function getLatestReport(courseId) {
   return request(`/courses/${courseId}/report/latest`);
 }

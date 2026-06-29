@@ -88,6 +88,7 @@ class UploadResponse(BaseModel):
     rejected_count: int
     rejected_files: list[RejectedFile]
     course_ids: list[int]
+    courses: list[CourseListItem] = []
     queued_report_ids: list[int] = []
     message: str
 

@@ -1,11 +1,14 @@
 import {
   AlertTriangle,
   BookOpen,
+  Check,
   CircleCheck,
   Download,
   FileArchive,
   FileText,
   Loader2,
+  MoreVertical,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -94,13 +97,14 @@ function UploadZone({ onUploaded, onToast }) {
         (res.rejected_files || []).forEach((item) =>
           onToast?.("warn", `${item.filename}: ${item.reason}`)
         );
+        // refresh immediately after each file so new cards appear right away
+        onUploaded?.(res);
       } catch (exc) {
         onToast?.("error", `${file.name}: ${exc.message}`);
       }
     }
     setFiles([]);
     setUploading(false);
-    await onUploaded();
   }
 
   function handleZoneClick(e) {
@@ -196,7 +200,7 @@ function SkeletonCard() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // COURSE CARD
 // ═══════════════════════════════════════════════════════════════════════════════
-function CourseCard({ course, onClick }) {
+function CourseCard({ course, onClick, onDelete, selecting, selected, onToggleSelect }) {
   const color = courseColor(course.id);
   const status = course.latest_report_status;
   const isProcessing = ["queued", "processing"].includes(status);
@@ -216,52 +220,139 @@ function CourseCard({ course, onClick }) {
             ? "Error"
             : "Pendiente";
 
-  return (
-    <button
-      className={`course-card ${isProcessing ? "course-card--processing" : ""}`}
-      style={{
-        "--card-bg": color.bg,
-        "--card-border": color.border,
-        "--card-accent": color.accent,
-      }}
-      onClick={onClick}
-      disabled={isProcessing}
-      aria-label={
-        isProcessing
-          ? `${course.course_name} está siendo analizado`
-          : `Abrir curso ${course.course_name}`
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClickOutside(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+        setConfirming(false);
       }
-      title={isProcessing ? "Disponible cuando finalice el análisis" : undefined}
-    >
-      <div className="card-top-bar" />
-      <div className="card-body">
-        <div className="card-title">{course.course_name}</div>
-        <div className="card-subtitle">{course.course_code}</div>
-        <div className="card-meta">
-          <span className="card-chip">{course.academic_period}</span>
-          <span className="card-chip">{course.career}</span>
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  function handleCardClick() {
+    if (selecting) { onToggleSelect(course.id); return; }
+    onClick();
+  }
+
+  return (
+    <div className={`course-card-wrap${selected ? " course-card-wrap--selected" : ""}`}>
+      <button
+        className={`course-card ${isProcessing && !selecting ? "course-card--processing" : ""}`}
+        style={{
+          "--card-bg": color.bg,
+          "--card-border": color.border,
+          "--card-accent": color.accent,
+        }}
+        onClick={handleCardClick}
+        disabled={isProcessing && !selecting}
+        aria-pressed={selecting ? selected : undefined}
+        aria-label={
+          selecting
+            ? `${selected ? "Deseleccionar" : "Seleccionar"} ${course.course_name}`
+            : isProcessing
+              ? `${course.course_name} está siendo analizado`
+              : `Abrir curso ${course.course_name}`
+        }
+        title={isProcessing && !selecting ? "Disponible cuando finalice el análisis" : undefined}
+      >
+        <div className="card-top-bar" />
+        <div className="card-body">
+          <div className="card-title">{course.course_name}</div>
+          <div className="card-subtitle">{course.course_code}</div>
+          <div className="card-meta">
+            <span className="card-chip">{course.academic_period}</span>
+            <span className="card-chip">{course.career}</span>
+          </div>
         </div>
-      </div>
-      <div className="card-footer">
-        <span className="card-count">
-          <FileText size={13} aria-hidden="true" />
-          {course.syllabus_count} syllabus
-        </span>
-        <span
-          className={`card-status ${isClean ? "card-status--done" : ""} ${
-            hasInconsistencies ? "card-status--warning" : ""
-          } ${status === "failed" ? "card-status--error" : ""} ${
-            isProcessing ? "card-status--active" : ""
-          }`}
-        >
-          {isProcessing && <Loader2 className="spin" size={14} aria-hidden="true" />}
-          {hasInconsistencies && <AlertTriangle size={14} aria-hidden="true" />}
-          {isClean && <CircleCheck size={14} aria-hidden="true" />}
-          {status === "failed" && <AlertTriangle size={14} aria-hidden="true" />}
-          {statusLabel}
-        </span>
-      </div>
-    </button>
+        <div className="card-footer">
+          <span className="card-count">
+            <FileText size={13} aria-hidden="true" />
+            {course.syllabus_count} syllabus
+          </span>
+          <span
+            className={`card-status ${isClean ? "card-status--done" : ""} ${
+              hasInconsistencies ? "card-status--warning" : ""
+            } ${status === "failed" ? "card-status--error" : ""} ${
+              isProcessing ? "card-status--active" : ""
+            }`}
+          >
+            {isProcessing && <Loader2 className="spin" size={14} aria-hidden="true" />}
+            {hasInconsistencies && <AlertTriangle size={14} aria-hidden="true" />}
+            {isClean && <CircleCheck size={14} aria-hidden="true" />}
+            {status === "failed" && <AlertTriangle size={14} aria-hidden="true" />}
+            {statusLabel}
+          </span>
+        </div>
+      </button>
+
+      {selecting ? (
+        <div className="card-select-indicator" aria-hidden="true">
+          <div className={`card-checkbox${selected ? " card-checkbox--checked" : ""}`}>
+            {selected && <Check size={11} strokeWidth={3} />}
+          </div>
+        </div>
+      ) : (
+        <div className="card-menu" ref={menuRef}>
+          <button
+            type="button"
+            className="card-menu-trigger"
+            aria-label="Opciones del curso"
+            aria-expanded={menuOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((o) => !o);
+              setConfirming(false);
+            }}
+          >
+            <MoreVertical size={20} strokeWidth={2.5} aria-hidden="true" />
+          </button>
+
+          {menuOpen && (
+            <div className="card-menu-dropdown" role="menu">
+              {!confirming ? (
+                <button
+                  type="button"
+                  className="card-menu-item card-menu-item--danger"
+                  role="menuitem"
+                  onClick={() => setConfirming(true)}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Eliminar curso
+                </button>
+              ) : (
+                <div className="card-menu-confirm">
+                  <p>¿Eliminar este curso? Esta acción no se puede deshacer.</p>
+                  <div className="card-menu-confirm-actions">
+                    <button
+                      type="button"
+                      className="card-menu-item"
+                      onClick={() => { setConfirming(false); setMenuOpen(false); }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      className="card-menu-item card-menu-item--danger"
+                      onClick={() => { setMenuOpen(false); setConfirming(false); onDelete(course.id); }}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -467,8 +558,34 @@ export default function Homepage({
   loading,
   onOpenCourse,
   onRefresh,
+  onDeleteCourse,
+  onDeleteMany,
   addToast,
 }) {
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function cancelSelect() {
+    setSelecting(false);
+    setSelectedIds(new Set());
+    setConfirmingDelete(false);
+  }
+
+  function confirmDeleteSelected() {
+    onDeleteMany([...selectedIds]);
+    cancelSelect();
+  }
+
   return (
     <div className="home-view">
       <UploadZone onUploaded={onRefresh} onToast={addToast} />
@@ -479,9 +596,37 @@ export default function Homepage({
             <BookOpen size={18} aria-hidden="true" />
             Cursos
           </h2>
-          {courses.length > 0 && (
-            <span className="courses-count">{courses.length} cursos</span>
-          )}
+          <div className="courses-header-actions">
+            {!selecting && courses.length > 0 && (
+              <span className="courses-count">{courses.length} cursos</span>
+            )}
+            {courses.length > 0 && !selecting && (
+              <button
+                type="button"
+                className="select-toggle-btn"
+                onClick={() => setSelecting(true)}
+              >
+                Seleccionar
+              </button>
+            )}
+            {selecting && (
+              <>
+                <button type="button" className="select-toggle-btn" onClick={cancelSelect}>
+                  Cancelar
+                </button>
+                {selectedIds.size > 0 && (
+                  <button
+                    type="button"
+                    className="select-delete-btn"
+                    onClick={() => setConfirmingDelete(true)}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    Eliminar {selectedIds.size}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         {loading && courses.length === 0 ? (
@@ -503,6 +648,10 @@ export default function Homepage({
                 key={course.id}
                 course={course}
                 onClick={() => onOpenCourse(course.id)}
+                onDelete={onDeleteCourse}
+                selecting={selecting}
+                selected={selectedIds.has(course.id)}
+                onToggleSelect={toggleSelect}
               />
             ))}
           </div>
@@ -510,6 +659,40 @@ export default function Homepage({
       </div>
 
       <ConditionsExportPreview table={exportTable} />
+
+      {confirmingDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmingDelete(false)}>
+          <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon">
+              <Trash2 size={22} aria-hidden="true" />
+            </div>
+            <h3 className="modal-title">
+              ¿Eliminar {selectedIds.size} curso{selectedIds.size !== 1 ? "s" : ""}?
+            </h3>
+            <p className="modal-body">
+              Esta acción no se puede deshacer. Los syllabus y análisis asociados
+              también serán eliminados permanentemente.
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="select-toggle-btn"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="select-delete-btn"
+                onClick={confirmDeleteSelected}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                Eliminar {selectedIds.size}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
