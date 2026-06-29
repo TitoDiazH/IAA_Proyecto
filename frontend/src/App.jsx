@@ -1,3 +1,4 @@
+import { ArrowLeft, BookOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   analyzeCourse,
@@ -10,6 +11,74 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Login from "./views/Login";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
+
+const HOME_CACHE_KEY = "iaa_home_v1";
+const COURSE_CACHE_KEY = "iaa_course_v1";
+
+function readHomeCache() {
+  try {
+    const raw = localStorage.getItem(HOME_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHomeCache(courses, exportTable) {
+  try {
+    localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ courses, exportTable }));
+  } catch {}
+}
+
+function readCourseCache(courseId) {
+  try {
+    const raw = localStorage.getItem(COURSE_CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    return String(cached?.courseId) === String(courseId) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCourseCache(courseId, course, report) {
+  try {
+    localStorage.setItem(COURSE_CACHE_KEY, JSON.stringify({ courseId: String(courseId), course, report }));
+  } catch {}
+}
+
+function clearAllCache() {
+  try {
+    localStorage.removeItem(HOME_CACHE_KEY);
+    localStorage.removeItem(COURSE_CACHE_KEY);
+  } catch {}
+}
+
+function AppNav({ user, isHome, onBack, signOut }) {
+  return (
+    <nav className="app-nav" aria-label="Navegación principal">
+      <div className="app-nav-start">
+        {isHome ? (
+          <span className="app-nav-brand">
+            <BookOpen size={17} aria-hidden="true" />
+            Revisión de Syllabus
+          </span>
+        ) : (
+          <button type="button" className="app-nav-back" onClick={onBack}>
+            <ArrowLeft size={16} aria-hidden="true" />
+            Todos los cursos
+          </button>
+        )}
+      </div>
+      <div className="app-nav-end">
+        <span className="app-nav-email">{user.email}</span>
+        <button type="button" className="ghost-button app-nav-logout" onClick={signOut}>
+          Cerrar sesión
+        </button>
+      </div>
+    </nav>
+  );
+}
 
 const HOME_ROUTE = { view: "home" };
 
@@ -50,12 +119,21 @@ function AppContent() {
   const { user, loading, signOut } = useAuth();
 
   const [route, setRoute] = useState(parseRoute);
-  const [courses, setCourses] = useState([]);
-  const [exportTable, setExportTable] = useState(null);
-  const [activeCourse, setActiveCourse] = useState(null);
-  const [report, setReport] = useState(null);
+  const [courses, setCourses] = useState(() => readHomeCache()?.courses ?? []);
+  const [exportTable, setExportTable] = useState(() => readHomeCache()?.exportTable ?? null);
+  const [activeCourse, setActiveCourse] = useState(() => {
+    const r = parseRoute();
+    return r.view === "course" ? (readCourseCache(r.courseId)?.course ?? null) : null;
+  });
+  const [report, setReport] = useState(() => {
+    const r = parseRoute();
+    return r.view === "course" ? (readCourseCache(r.courseId)?.report ?? null) : null;
+  });
   const [loadingCourses, setLoadingCourses] = useState(true);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(() => {
+    const r = parseRoute();
+    return r.view === "course" ? !readCourseCache(r.courseId)?.course : false;
+  });
   const [retryingAnalysis, setRetryingAnalysis] = useState(false);
   const [error, setError] = useState(null);
 
@@ -69,6 +147,7 @@ function AppContent() {
       ]);
       setCourses(data);
       setExportTable(table);
+      writeHomeCache(data, table);
     } catch (exc) {
       setError(exc.message);
     } finally {
@@ -77,8 +156,12 @@ function AppContent() {
   }
 
   async function loadCourse(courseId) {
-    setLoadingDetail(true);
-    setReport(null);
+    const hasCached = activeCourse && String(activeCourse.id) === String(courseId);
+    if (!hasCached) {
+      setActiveCourse(null);
+      setReport(null);
+      setLoadingDetail(true);
+    }
     setError(null);
     try {
       const course = await getCourse(courseId);
@@ -87,9 +170,12 @@ function AppContent() {
         try {
           const latestReport = await getLatestReport(courseId);
           setReport(latestReport);
+          writeCourseCache(courseId, course, latestReport);
         } catch (exc) {
           setError(exc.message);
         }
+      } else {
+        writeCourseCache(courseId, course, null);
       }
     } catch (exc) {
       setError(exc.message);
@@ -203,12 +289,12 @@ function AppContent() {
 
   return (
     <div className="app-shell">
-      <div className="user-bar">
-        <span className="user-bar-email">{user.email}</span>
-        <button type="button" className="ghost-button user-bar-logout" onClick={signOut}>
-          Cerrar sesión
-        </button>
-      </div>
+      <AppNav
+        user={user}
+        isHome={route.view === "home"}
+        onBack={goHome}
+        signOut={() => { clearAllCache(); signOut(); }}
+      />
 
       {error && (
         <div className="global-error">

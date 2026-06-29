@@ -1,9 +1,9 @@
 import {
   AlertTriangle,
-  ArrowLeft,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock,
   ExternalLink,
   FileText,
   Loader2,
@@ -1387,6 +1387,14 @@ function analysisStatusLabel(status) {
   return "Pendiente";
 }
 
+function formatAnalysisTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
 export default function Course({
   course,
   report,
@@ -1445,10 +1453,6 @@ export default function Course({
         }}
       >
         <div className="detail-header-bar" />
-        <button className="back-button detail-header-back" onClick={onBack}>
-          <ArrowLeft size={17} />
-          Todos los cursos
-        </button>
 
         {course && (
           <>
@@ -1459,7 +1463,15 @@ export default function Course({
             <div className="detail-actions">
               <span className={`analysis-status analysis-status--${analysisStatus || "pending"}`}>
                 {analysisIsActive && <Loader2 className="spin" size={16} />}
-                {analysisStatusLabel(analysisStatus)}
+                {reportIsReady && report?.processing_time_seconds
+                  ? (
+                    <>
+                      <Clock size={14} aria-hidden="true" />
+                      {`Análisis IA: ${formatAnalysisTime(report.processing_time_seconds)}`}
+                    </>
+                  )
+                  : analysisStatusLabel(analysisStatus)
+                }
               </span>
             </div>
           </>

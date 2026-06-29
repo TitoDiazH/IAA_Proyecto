@@ -475,15 +475,6 @@ export default function Homepage({
 }) {
   return (
     <div className="home-view">
-      <header className="app-header">
-        <div>
-          <h1>Revisión de Syllabus</h1>
-          <p className="header-sub">
-            Detecta inconsistencias entre secciones de un mismo curso
-          </p>
-        </div>
-      </header>
-
       <UploadZone onUploaded={onRefresh} />
 
       <div className="courses-section">
