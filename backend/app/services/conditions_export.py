@@ -10,7 +10,7 @@ from xml.sax.saxutils import escape
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import AnalysisReport, CourseGroup
+from app.models import AnalysisReport, CourseGroup, Syllabus
 from app.services.filename_parser import normalize_course_name
 
 
@@ -43,34 +43,63 @@ HEADER_ROWS = [
 COLUMNS = HEADER_ROWS[-1]
 
 
-def build_conditions_export_table(db: Session, user_id: str) -> dict[str, Any]:
-    groups = (
+def build_conditions_rows_for_group(
+    group: CourseGroup, syllabi: list[Syllabus], normalized_by_nrc: dict[str, Any]
+) -> list[list[str]]:
+    """Build the export rows for one course group's report.
+
+    This is the expensive, regex-heavy part of the export table. It's called once
+    when a report finishes analyzing (see report_service.analyze_course) and the
+    result is cached on the report's summary, so building the table for display
+    later on is just a cheap read instead of redoing this work on every request.
+    """
+
+    return [
+        _build_row(group, syllabus.nrc, normalized_by_nrc.get(str(syllabus.nrc)) or {})
+        for syllabus in sorted(syllabi, key=lambda item: item.nrc)
+    ]
+
+
+def build_conditions_export_table(
+    db: Session, user_id: str, academic_period: str | None = None
+) -> dict[str, Any]:
+    query = (
         db.query(CourseGroup)
         .options(
             selectinload(CourseGroup.syllabi),
             selectinload(CourseGroup.reports).selectinload(AnalysisReport.inconsistencies),
         )
         .filter(CourseGroup.user_id == user_id)
-        .order_by(CourseGroup.academic_period.desc(), CourseGroup.course_code.asc())
-        .all()
     )
+    if academic_period:
+        query = query.filter(CourseGroup.academic_period == academic_period)
+    groups = query.order_by(CourseGroup.academic_period.desc(), CourseGroup.course_code.asc()).all()
 
     rows: list[list[str]] = []
+    row_periods: list[str] = []
     for group in groups:
         latest = _latest_report(group)
         if latest is None or latest.status != "completed":
             continue
 
-        normalized_by_nrc = _normalized_by_nrc_for_report(latest)
+        summary = latest.summary if isinstance(latest.summary, dict) else {}
+        cached_rows = summary.get("conditions_export_rows")
+        if isinstance(cached_rows, list):
+            group_rows = cached_rows
+        else:
+            # Older reports computed before row caching existed: build once here.
+            group_rows = build_conditions_rows_for_group(
+                group, group.syllabi, _normalized_by_nrc_for_report(latest)
+            )
 
-        for syllabus in sorted(group.syllabi, key=lambda item: item.nrc):
-            normalized = normalized_by_nrc.get(str(syllabus.nrc), {})
-            rows.append(_build_row(group, syllabus.nrc, normalized))
+        rows.extend(group_rows)
+        row_periods.extend([group.academic_period] * len(group_rows))
 
     return {
         "header_rows": HEADER_ROWS,
         "columns": COLUMNS,
         "rows": rows,
+        "row_periods": row_periods,
         "row_count": len(rows),
     }
 

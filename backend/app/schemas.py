@@ -39,6 +39,7 @@ class CourseListItem(BaseModel):
     latest_report_id: int | None = None
     latest_report_status: str | None = None
     latest_report_inconsistency_count: int | None = None
+    latest_report_error_type: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -97,4 +98,5 @@ class ConditionsExportTable(BaseModel):
     header_rows: list[list[str]]
     columns: list[str]
     rows: list[list[str]]
+    row_periods: list[str] = []
     row_count: int

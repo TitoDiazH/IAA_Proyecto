@@ -1,4 +1,4 @@
-import { BookOpen } from "lucide-react";
+import { BookOpen, Check, X } from "lucide-react";
 import { useState } from "react";
 import { supabase } from "../supabase";
 const campusImage = "/campus.webp";
@@ -16,6 +16,37 @@ function translateError(msg) {
     if (msg.includes(key)) return value;
   }
   return msg;
+}
+
+const PASSWORD_RULES = [
+  { label: "Mínimo 8 caracteres", test: (pw) => pw.length >= 8 },
+  { label: "Una letra mayúscula", test: (pw) => /[A-Z]/.test(pw) },
+  { label: "Una letra minúscula", test: (pw) => /[a-z]/.test(pw) },
+  { label: "Un número", test: (pw) => /[0-9]/.test(pw) },
+  { label: "Un carácter especial (!@#$%...)", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
+];
+
+function isPasswordValid(pw) {
+  return PASSWORD_RULES.every((rule) => rule.test(pw));
+}
+
+function PasswordRequirements({ password }) {
+  return (
+    <ul className="password-requirements">
+      {PASSWORD_RULES.map((rule) => {
+        const met = rule.test(password);
+        return (
+          <li
+            key={rule.label}
+            className={`password-requirement${met ? " password-requirement--met" : ""}`}
+          >
+            {met ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
+            {rule.label}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 export default function Login() {
@@ -37,6 +68,11 @@ export default function Login() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
+        if (!isPasswordValid(password)) {
+          setError("La contraseña no cumple los requisitos de seguridad.");
+          setLoading(false);
+          return;
+        }
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         setSuccess(
@@ -104,6 +140,7 @@ export default function Login() {
               placeholder={mode === "register" ? "Mínimo 8 caracteres" : ""}
               disabled={loading}
             />
+            {mode === "register" && <PasswordRequirements password={password} />}
           </div>
 
           {error && <p className="message error">{error}</p>}
@@ -112,7 +149,7 @@ export default function Login() {
           <button
             type="submit"
             className="primary-button auth-submit"
-            disabled={loading}
+            disabled={loading || (mode === "register" && !isPasswordValid(password))}
           >
             {loading ? "Cargando…" : mode === "login" ? "Ingresar" : "Crear cuenta"}
           </button>

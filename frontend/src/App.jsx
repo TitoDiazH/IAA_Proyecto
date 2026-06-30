@@ -9,11 +9,12 @@ import {
   listCourses,
 } from "./api";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { currentPeriod } from "./periods";
 import Login from "./views/Login";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
 
-const HOME_CACHE_KEY = "iaa_home_v1";
+const HOME_CACHE_KEY = "iaa_home_v2";
 const COURSE_CACHE_KEY = "iaa_course_v1";
 const TOAST_DURATION_MS = 7000;
 const TOAST_FADE_DURATION_MS = 300;
@@ -27,9 +28,9 @@ function readHomeCache() {
   }
 }
 
-function writeHomeCache(courses, exportTable) {
+function writeHomeCache(courses, exportTable, selectedPeriod) {
   try {
-    localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ courses, exportTable }));
+    localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ courses, exportTable, selectedPeriod }));
   } catch {}
 }
 
@@ -55,6 +56,28 @@ function clearAllCache() {
     localStorage.removeItem(HOME_CACHE_KEY);
     localStorage.removeItem(COURSE_CACHE_KEY);
   } catch {}
+}
+
+// Keeps `rows` and `row_periods` in lockstep when filtering the conditions table.
+function filterTableRows(table, predicate) {
+  if (!table?.rows?.length) return table;
+  const keepIndexes = table.rows.map((_, i) => i).filter((i) => predicate(table.rows[i], i));
+  return {
+    ...table,
+    rows: keepIndexes.map((i) => table.rows[i]),
+    row_periods: keepIndexes.map((i) => table.row_periods?.[i]),
+    row_count: keepIndexes.length,
+  };
+}
+
+function filterTableByPeriod(table, period) {
+  // Defensive fallback: if the table predates row_periods (stale cache or an
+  // older backend response), show all rows instead of silently filtering
+  // everything out.
+  if (!Array.isArray(table?.row_periods) || table.row_periods.length !== table?.rows?.length) {
+    return table;
+  }
+  return filterTableRows(table, (_, i) => table.row_periods[i] === period);
 }
 
 function ToastContainer({ toasts, onDismiss }) {
@@ -149,6 +172,8 @@ function AppContent() {
   const [route, setRoute] = useState(parseRoute);
   const [courses, setCourses] = useState(() => readHomeCache()?.courses ?? []);
   const [exportTable, setExportTable] = useState(() => readHomeCache()?.exportTable ?? null);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => readHomeCache()?.selectedPeriod || currentPeriod());
+  const selectedPeriodRef = useRef(selectedPeriod);
   const [activeCourse, setActiveCourse] = useState(() => {
     const r = parseRoute();
     return r.view === "course" ? (readCourseCache(r.courseId)?.course ?? null) : null;
@@ -186,6 +211,21 @@ function AppContent() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
+  function notifyQuotaFailures(previousCourses, nextCourses) {
+    const previousStatusById = new Map(previousCourses.map((c) => [String(c.id), c.latest_report_status]));
+    for (const course of nextCourses) {
+      const prevStatus = previousStatusById.get(String(course.id));
+      const justFailed =
+        ["queued", "processing"].includes(prevStatus) && course.latest_report_status === "failed";
+      if (justFailed && course.latest_report_error_type === "quota_exceeded") {
+        addToast(
+          "error",
+          `${course.course_name}: se agotó la cuota de la IA. Intenta el análisis más tarde.`
+        );
+      }
+    }
+  }
+
   async function refreshCourses(uploadResult = null) {
     // If the upload response includes course data, show cards immediately
     if (uploadResult?.courses?.length > 0) {
@@ -208,8 +248,9 @@ function AppContent() {
       const visible = pendingDeleteIds.current.size
         ? freshCourses.filter((c) => !pendingDeleteIds.current.has(String(c.id)))
         : freshCourses;
+      notifyQuotaFailures(courses, visible);
       setCourses(visible);
-      writeHomeCache(visible, exportTable);
+      writeHomeCache(visible, exportTable, selectedPeriodRef.current);
     } catch (exc) {
       if (!uploadResult) setError(exc.message);
       setLoadingCourses(false);
@@ -217,17 +258,25 @@ function AppContent() {
     }
     setLoadingCourses(false);
     // export table is secondary — failure must not block course display
+    // Fetched once across all periods (each row is tagged via row_periods) so
+    // switching periods afterwards is an instant client-side filter, not a refetch.
     try {
       const table = await getConditionsExportTable();
       // Filter out rows for courses whose delete is still in flight
       const filteredTable = pendingDeleteCodes.current.size
-        ? { ...table, rows: table.rows.filter((r) => !pendingDeleteCodes.current.has(r[1])), get row_count() { return this.rows.length; } }
+        ? filterTableRows(table, (r) => !pendingDeleteCodes.current.has(r[1]))
         : table;
       setExportTable(filteredTable);
-      writeHomeCache(freshCourses, filteredTable);
+      writeHomeCache(freshCourses, filteredTable, selectedPeriodRef.current);
     } catch {
       // silent — export table is best-effort
     }
+  }
+
+  function changePeriod(nextPeriod) {
+    selectedPeriodRef.current = nextPeriod;
+    setSelectedPeriod(nextPeriod);
+    writeHomeCache(courses, exportTable, nextPeriod);
   }
 
   function _addPendingCode(code) {
@@ -240,10 +289,9 @@ function AppContent() {
   }
 
   function _filterExportTable(table, codes) {
-    if (!table?.rows?.length || !codes.length) return table;
+    if (!codes.length) return table;
     const codeSet = new Set(codes);
-    const rows = table.rows.filter((r) => !codeSet.has(r[1]));
-    return { ...table, rows, row_count: rows.length };
+    return filterTableRows(table, (r) => !codeSet.has(r[1]));
   }
 
   async function loadCourse(courseId) {
@@ -304,7 +352,7 @@ function AppContent() {
     const updatedTable = _filterExportTable(exportTable, code ? [code] : []);
     setCourses(updatedCourses);
     if (updatedTable !== exportTable) setExportTable(updatedTable);
-    writeHomeCache(updatedCourses, updatedTable);
+    writeHomeCache(updatedCourses, updatedTable, selectedPeriodRef.current);
     localStorage.removeItem(COURSE_CACHE_KEY);
 
     deleteCourse(courseId)
@@ -338,7 +386,7 @@ function AppContent() {
     const updatedTable = _filterExportTable(exportTable, deletedCodes);
     setCourses(updatedCourses);
     if (updatedTable !== exportTable) setExportTable(updatedTable);
-    writeHomeCache(updatedCourses, updatedTable);
+    writeHomeCache(updatedCourses, updatedTable, selectedPeriodRef.current);
     localStorage.removeItem(COURSE_CACHE_KEY);
 
     Promise.allSettled(courseIds.map((id) => deleteCourse(id))).then((results) => {
@@ -434,12 +482,16 @@ function AppContent() {
 
     const interval = window.setInterval(async () => {
       try {
+        const wasActive = ["queued", "processing"].includes(status);
         const [updatedCourse, latestReport] = await Promise.all([
           getCourse(activeCourse.id),
           getLatestReport(activeCourse.id),
         ]);
         setActiveCourse(updatedCourse);
         setReport(latestReport);
+        if (wasActive && latestReport.status === "failed" && latestReport.summary?.error_type === "quota_exceeded") {
+          addToast("error", "Se agotó la cuota de la IA. Intenta el análisis más tarde.");
+        }
       } catch (exc) {
         setError(exc.message);
       }
@@ -475,9 +527,12 @@ function AppContent() {
 
       {route.view === "home" ? (
         <Homepage
-          courses={courses}
-          exportTable={exportTable}
+          courses={courses.filter((c) => c.academic_period === selectedPeriod)}
+          hasAnyCourses={courses.length > 0}
+          exportTable={filterTableByPeriod(exportTable, selectedPeriod)}
           loading={loadingCourses}
+          selectedPeriod={selectedPeriod}
+          onPeriodChange={changePeriod}
           onOpenCourse={openCourse}
           onRefresh={refreshCourses}
           onDeleteCourse={handleDeleteCourse}

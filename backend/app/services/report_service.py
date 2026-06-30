@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import AnalysisReport, CourseGroup, Inconsistency, Syllabus
 from app.services.ai_analyzer import analyze_syllabi
+from app.services.conditions_export import build_conditions_rows_for_group
 from app.services.filename_parser import normalize_course_name
 
 
@@ -34,6 +35,7 @@ def mark_report_queued_after_error(
     message: str,
     elapsed: float = 0,
     max_retries: int = 3,
+    error_type: str | None = None,
 ) -> bool:
     report = db.query(AnalysisReport).filter(AnalysisReport.id == report_id).one_or_none()
     if report is None:
@@ -47,6 +49,7 @@ def mark_report_queued_after_error(
         report.summary = {
             "message": f"El análisis falló después de {max_retries} reintentos automáticos.",
             "last_error": message,
+            "error_type": error_type,
             "retry_count": retry_count,
             "max_retries": max_retries,
             "analysis_provider": "gemini",
@@ -57,6 +60,7 @@ def mark_report_queued_after_error(
         report.summary = {
             "message": "El análisis falló y volvió a la cola automáticamente.",
             "last_error": message,
+            "error_type": error_type,
             "retry_count": next_retry_count,
             "max_retries": max_retries,
             "analysis_provider": "gemini",
@@ -129,6 +133,7 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
             "message": "Se requiere al menos dos syllabus para comparar un curso.",
             "compared_count": len(syllabi),
             "severity_counts": {},
+            "conditions_export_rows": build_conditions_rows_for_group(course, syllabi, {}),
         }
         report.processing_time_seconds = round(time.perf_counter() - started_at, 3)
         db.commit()
@@ -149,6 +154,9 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
     summary["course"] = comparison.get("course", course_metadata)
     summary["analysis_provider"] = "gemini"
     summary["normalized_syllabi_by_nrc"] = comparison.get("normalized_syllabi_by_nrc", {})
+    summary["conditions_export_rows"] = build_conditions_rows_for_group(
+        course, syllabi, summary["normalized_syllabi_by_nrc"]
+    )
 
     if report is None:
         report = AnalysisReport(course_group_id=course.id)

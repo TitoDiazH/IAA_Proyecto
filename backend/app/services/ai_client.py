@@ -21,6 +21,10 @@ class AIProviderError(RuntimeError):
     """Raised when the AI provider fails or returns an invalid response."""
 
 
+class AIQuotaExceededError(AIProviderError):
+    """Raised when the AI provider reports its request quota/rate limit was exceeded."""
+
+
 class JsonCompletionClient(Protocol):
     def complete_json(
         self,
@@ -62,6 +66,12 @@ class GeminiJsonClient:
         message = getattr(exc, "message", None) or str(exc)
         return f"{code}: {message}" if code else message
 
+    @staticmethod
+    def _is_quota_error(exc: Exception) -> bool:
+        code = getattr(exc, "code", None)
+        text = f"{code} {getattr(exc, 'message', None) or exc}".upper()
+        return code == 429 or "RESOURCE_EXHAUSTED" in text or "QUOTA" in text or "RATE LIMIT" in text
+
     def complete_json(
         self,
         *,
@@ -85,7 +95,10 @@ class GeminiJsonClient:
             )
         except Exception as exc:
             detail = self._provider_error_message(exc)
-            raise AIProviderError(f"Gemini falló al generar {schema_name}: {detail}") from exc
+            message = f"Gemini falló al generar {schema_name}: {detail}"
+            if self._is_quota_error(exc):
+                raise AIQuotaExceededError(message) from exc
+            raise AIProviderError(message) from exc
 
         parsed = getattr(response, "parsed", None)
         if isinstance(parsed, dict):

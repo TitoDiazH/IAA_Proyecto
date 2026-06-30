@@ -2,6 +2,8 @@ import {
   AlertTriangle,
   BookOpen,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleCheck,
   Download,
   FileArchive,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { downloadConditionsExport, uploadZip } from "../api";
+import { formatPeriod, shiftPeriod } from "../periods";
 
 // ─── Color palette for course cards ─────────────────────────────────────────
 const PALETTE = [
@@ -170,6 +173,37 @@ function UploadZone({ onUploaded, onToast }) {
           </button>
         </form>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERIOD SELECTOR
+// ═══════════════════════════════════════════════════════════════════════════════
+function PeriodSelector({ period, onChange }) {
+  return (
+    <div className="period-selector" role="group" aria-label="Periodo académico">
+      <button
+        type="button"
+        className="icon-button period-nav-btn"
+        onClick={() => onChange(shiftPeriod(period, -1))}
+        aria-label="Periodo anterior"
+        title="Periodo anterior"
+      >
+        <ChevronLeft size={18} aria-hidden="true" />
+      </button>
+      <span className="period-label" aria-live="polite">
+        {formatPeriod(period)}
+      </span>
+      <button
+        type="button"
+        className="icon-button period-nav-btn"
+        onClick={() => onChange(shiftPeriod(period, 1))}
+        aria-label="Periodo siguiente"
+        title="Periodo siguiente"
+      >
+        <ChevronRight size={18} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -356,7 +390,7 @@ function CourseCard({ course, onClick, onDelete, selecting, selected, onToggleSe
   );
 }
 
-function ConditionsExportPreview({ table }) {
+function ConditionsExportPreview({ table, academicPeriod }) {
   const [filename, setFilename] = useState("condiciones-aprobacion");
   const [format, setFormat] = useState("xlsx");
   const [modalOpen, setModalOpen] = useState(false);
@@ -387,7 +421,7 @@ function ConditionsExportPreview({ table }) {
     setExporting(true);
     setError(null);
     try {
-      const blob = await downloadConditionsExport({ format, filename });
+      const blob = await downloadConditionsExport({ format, filename, academicPeriod });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -554,8 +588,11 @@ function ConditionsExportPreview({ table }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Homepage({
   courses,
+  hasAnyCourses,
   exportTable,
   loading,
+  selectedPeriod,
+  onPeriodChange,
   onOpenCourse,
   onRefresh,
   onDeleteCourse,
@@ -565,6 +602,12 @@ export default function Homepage({
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    setSelecting(false);
+    setSelectedIds(new Set());
+    setConfirmingDelete(false);
+  }, [selectedPeriod]);
 
   function toggleSelect(id) {
     setSelectedIds((prev) => {
@@ -589,6 +632,8 @@ export default function Homepage({
   return (
     <div className="home-view">
       <UploadZone onUploaded={onRefresh} onToast={addToast} />
+
+      <PeriodSelector period={selectedPeriod} onChange={onPeriodChange} />
 
       <div className="courses-section">
         <div className="courses-section-header">
@@ -638,8 +683,12 @@ export default function Homepage({
         ) : courses.length === 0 ? (
           <div className="empty-state">
             <FileArchive size={36} aria-hidden="true" />
-            <h3>No hay cursos cargados</h3>
-            <p>Sube un archivo ZIP con syllabus en PDF para comenzar.</p>
+            <h3>{hasAnyCourses ? "No hay cursos en este periodo" : "No hay cursos cargados"}</h3>
+            <p>
+              {hasAnyCourses
+                ? "Cambia de periodo o sube un archivo ZIP para este periodo."
+                : "Sube un archivo ZIP con syllabus en PDF para comenzar."}
+            </p>
           </div>
         ) : (
           <div className="course-grid">
@@ -658,7 +707,7 @@ export default function Homepage({
         )}
       </div>
 
-      <ConditionsExportPreview table={exportTable} />
+      <ConditionsExportPreview table={exportTable} academicPeriod={selectedPeriod} />
 
       {confirmingDelete && (
         <div className="modal-overlay" onClick={() => setConfirmingDelete(false)}>

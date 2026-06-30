@@ -21,20 +21,22 @@ router = APIRouter(prefix="/api/exports", tags=["exports"])
 
 @router.get("/conditions", response_model=ConditionsExportTable)
 def get_conditions_export_table(
+    academic_period: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    return build_conditions_export_table(db, current_user["id"])
+    return build_conditions_export_table(db, current_user["id"], academic_period)
 
 
 @router.get("/conditions/download")
 def download_conditions_export(
     format: str = Query("csv", pattern="^(csv|xlsx)$"),
     filename: str = Query("condiciones-aprobacion"),
+    academic_period: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> Response:
-    table = build_conditions_export_table(db, current_user["id"])
+    table = build_conditions_export_table(db, current_user["id"], academic_period)
     safe_filename = _safe_filename(filename) or "condiciones-aprobacion"
 
     if format == "csv":

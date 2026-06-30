@@ -8,6 +8,7 @@ import time
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AnalysisReport
+from app.services.ai_client import AIQuotaExceededError
 from app.services.report_service import analyze_course, mark_report_queued_after_error
 
 
@@ -90,12 +91,14 @@ def _process_report(report_id: int) -> None:
     except Exception as exc:  # pragma: no cover - defensive background worker path
         logger.exception("Analysis job %s failed", report_id)
         db.rollback()
+        error_type = "quota_exceeded" if isinstance(exc, AIQuotaExceededError) else None
         should_requeue = mark_report_queued_after_error(
             db,
             report_id,
             str(exc),
             elapsed=time.perf_counter() - started_at,
             max_retries=get_settings().analysis_max_retries,
+            error_type=error_type,
         )
         if should_requeue:
             requeue_report_analysis(report_id)

@@ -69,15 +69,17 @@ export function uploadZip(file) {
   return request("/uploads/zip", { method: "POST", body });
 }
 
-export function getConditionsExportTable() {
-  return request("/exports/conditions");
+export function getConditionsExportTable(academicPeriod) {
+  const params = academicPeriod ? `?${new URLSearchParams({ academic_period: academicPeriod })}` : "";
+  return request(`/exports/conditions${params}`);
 }
 
-export async function downloadConditionsExport({ format, filename }) {
+export async function downloadConditionsExport({ format, filename, academicPeriod }) {
   const authHeader = await getAuthHeader();
   const params = new URLSearchParams({
     format,
     filename: filename || "condiciones-aprobacion",
+    ...(academicPeriod ? { academic_period: academicPeriod } : {}),
   });
   const response = await fetch(
     `${API_BASE}/exports/conditions/download?${params}`,

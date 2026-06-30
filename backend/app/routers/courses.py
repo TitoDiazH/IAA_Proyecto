@@ -43,6 +43,7 @@ def list_courses(
     response: list[CourseListItem] = []
     for group in groups:
         latest = _latest_report(group)
+        latest_summary = latest.summary if latest and isinstance(latest.summary, dict) else {}
         response.append(
             CourseListItem(
                 id=group.id,
@@ -58,6 +59,7 @@ def list_courses(
                 latest_report_inconsistency_count=(
                     len(latest.inconsistencies) if latest and latest.status == "completed" else None
                 ),
+                latest_report_error_type=latest_summary.get("error_type"),
                 created_at=group.created_at,
                 updated_at=group.updated_at,
             )
