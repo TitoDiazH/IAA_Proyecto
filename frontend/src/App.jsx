@@ -426,13 +426,13 @@ function AppContent() {
     });
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(model) {
     if (!activeCourse) return;
 
     setRetryingAnalysis(true);
     setError(null);
     try {
-      const queuedReport = await analyzeCourse(activeCourse.id);
+      const queuedReport = await analyzeCourse(activeCourse.id, model);
       const updatedCourse = await getCourse(activeCourse.id);
       setReport(queuedReport);
       setActiveCourse(updatedCourse);

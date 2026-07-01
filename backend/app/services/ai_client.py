@@ -114,10 +114,10 @@ class GeminiJsonClient:
             raise AIProviderError("Gemini no devolvió JSON válido.") from exc
 
 
-def get_json_client() -> JsonCompletionClient:
+def get_json_client(model: str | None = None) -> JsonCompletionClient:
     settings = get_settings()
     return GeminiJsonClient(
         api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
+        model=model or settings.gemini_model,
         timeout_seconds=settings.ai_request_timeout_seconds,
     )

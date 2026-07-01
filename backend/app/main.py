@@ -7,12 +7,14 @@ from app.config import get_settings
 from app.database import init_db
 from app.routers import auth, courses, exports, reports, uploads
 from app.services.analysis_queue import start_analysis_worker
+from app.services.user_preferences import warm_model_cache
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     start_analysis_worker()
+    warm_model_cache()
     yield
 
 

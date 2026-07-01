@@ -1,7 +1,7 @@
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, selectinload
 
@@ -13,6 +13,7 @@ from app.services.analysis_queue import enqueue_report_analysis
 from app.services.filename_parser import normalize_course_name
 from app.services.report_service import create_queued_analysis_report
 from app.services.storage_service import StorageError, delete_pdf, download_pdf
+from app.services.user_preferences import is_valid_model
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -124,6 +125,7 @@ def delete_course(
 @router.post("/{course_id}/analyze", response_model=ReportRead)
 def analyze_course_endpoint(
     course_id: int,
+    model: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ) -> AnalysisReport:
@@ -132,8 +134,12 @@ def analyze_course_endpoint(
     ).one_or_none()
     if group is None:
         raise HTTPException(status_code=404, detail="Curso no encontrado")
+
+    if model and not is_valid_model(model):
+        raise HTTPException(status_code=400, detail="Modelo no disponible.")
+
     try:
-        report = create_queued_analysis_report(db, course_id)
+        report = create_queued_analysis_report(db, course_id, model_override=model)
         db.commit()
         db.refresh(report)
         enqueue_report_analysis(report.id)

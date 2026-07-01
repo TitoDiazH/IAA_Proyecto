@@ -100,3 +100,18 @@ class ConditionsExportTable(BaseModel):
     rows: list[list[str]]
     row_periods: list[str] = []
     row_count: int
+
+
+class AvailableModel(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class ModelPreference(BaseModel):
+    available: list[AvailableModel]
+    selected: str
+
+
+class ModelPreferenceUpdate(BaseModel):
+    model: str

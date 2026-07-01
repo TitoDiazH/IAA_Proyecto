@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -13,7 +14,7 @@ import {
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getAuthHeader, syllabusDownloadUrl, syllabusViewUrl } from "../api";
+import { getAuthHeader, getModelPreference, syllabusDownloadUrl, syllabusViewUrl } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -1395,6 +1396,92 @@ function formatAnalysisTime(seconds) {
   return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ANALYZE MENU (re-run analysis, optionally choosing a specific model)
+// ═══════════════════════════════════════════════════════════════════════════════
+function AnalyzeMenu({ onAnalyze, retrying, disabled }) {
+  const [available, setAvailable] = useState([]);
+  const [preferred, setPreferred] = useState(null);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    getModelPreference()
+      .then((data) => {
+        setAvailable(data.available || []);
+        setPreferred(data.selected);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  function handlePick(modelId) {
+    setOpen(false);
+    onAnalyze(modelId);
+  }
+
+  return (
+    <div className="analyze-menu" ref={containerRef}>
+      <div className="analyze-menu-split">
+        <button
+          type="button"
+          className="primary-button analyze-menu-main"
+          onClick={() => onAnalyze()}
+          disabled={disabled}
+        >
+          {retrying ? <Loader2 className="spin" size={16} /> : <RefreshCcw size={16} />}
+          {retrying ? "Encolando…" : "Analizar de nuevo"}
+        </button>
+        {available.length > 0 && (
+          <button
+            type="button"
+            className="primary-button analyze-menu-caret"
+            onClick={() => setOpen((o) => !o)}
+            disabled={disabled}
+            aria-expanded={open}
+            aria-haspopup="listbox"
+            aria-label="Elegir modelo de IA para este análisis"
+            title="Elegir modelo de IA para este análisis"
+          >
+            <ChevronDown size={16} className={open ? "is-open" : ""} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="analyze-menu-dropdown" role="listbox">
+          {available.map((model) => (
+            <button
+              type="button"
+              key={model.id}
+              role="option"
+              aria-selected={model.id === preferred}
+              className={`model-option${model.id === preferred ? " model-option--selected" : ""}`}
+              onClick={() => handlePick(model.id)}
+            >
+              <span className="model-option-label">
+                {model.id === preferred && <Check size={14} aria-hidden="true" />}
+                {model.label}
+              </span>
+              <span className="model-option-description">{model.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Course({
   course,
   report,
@@ -1473,6 +1560,11 @@ export default function Course({
                   : analysisStatusLabel(analysisStatus)
                 }
               </span>
+              <AnalyzeMenu
+                onAnalyze={onAnalyze}
+                retrying={retryingAnalysis}
+                disabled={retryingAnalysis || analysisIsActive}
+              />
             </div>
           </>
         )}
@@ -1509,7 +1601,7 @@ export default function Course({
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={onAnalyze}
+                      onClick={() => onAnalyze()}
                       disabled={retryingAnalysis}
                     >
                       {retryingAnalysis ? (

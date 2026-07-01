@@ -62,6 +62,7 @@ def test_zip_upload_persists_supabase_uri(monkeypatch):
         db,
         "syllabi.zip",
         archive_bytes.getvalue(),
+        "user-1",
     )
 
     syllabus = db.query(Syllabus).one()

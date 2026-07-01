@@ -8,20 +8,25 @@ from app.models import AnalysisReport, CourseGroup, Inconsistency, Syllabus
 from app.services.ai_analyzer import analyze_syllabi
 from app.services.conditions_export import build_conditions_rows_for_group
 from app.services.filename_parser import normalize_course_name
+from app.services.user_preferences import get_preferred_model
 
 
-def create_queued_analysis_report(db: Session, course_id: int) -> AnalysisReport:
+def create_queued_analysis_report(
+    db: Session, course_id: int, model_override: str | None = None
+) -> AnalysisReport:
     course = db.query(CourseGroup).filter(CourseGroup.id == course_id).one_or_none()
     if course is None:
         raise ValueError("Curso no encontrado")
+
+    summary = {"message": "El análisis quedó en cola y se ejecutará automáticamente."}
+    if model_override:
+        summary["model_override"] = model_override
 
     report = AnalysisReport(
         course_group_id=course.id,
         status="queued",
         compared_nrcs=[],
-        summary={
-            "message": "El análisis quedó en cola y se ejecutará automáticamente.",
-        },
+        summary=summary,
         processing_time_seconds=0,
     )
     db.add(report)
@@ -43,6 +48,7 @@ def mark_report_queued_after_error(
 
     previous_summary = report.summary if isinstance(report.summary, dict) else {}
     retry_count = int(previous_summary.get("retry_count") or 0)
+    model_override = previous_summary.get("model_override")
 
     if retry_count >= max_retries:
         report.status = "failed"
@@ -66,6 +72,9 @@ def mark_report_queued_after_error(
             "analysis_provider": "gemini",
         }
 
+    if model_override:
+        report.summary["model_override"] = model_override
+
     report.processing_time_seconds = round(elapsed, 3)
     db.query(Inconsistency).filter(Inconsistency.report_id == report.id).delete()
     db.commit()
@@ -84,6 +93,7 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
 
     syllabi: list[Syllabus] = sorted(course.syllabi, key=lambda item: item.nrc)
     course_name = normalize_course_name(course.course_name)
+    model = get_preferred_model(db, course.user_id)
     started_at = time.perf_counter()
     report = None
 
@@ -100,10 +110,16 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
             raise ValueError("Reporte no encontrado")
 
         previous_summary = report.summary if isinstance(report.summary, dict) else {}
+        model_override = previous_summary.get("model_override")
+        if model_override:
+            model = model_override
+
         processing_summary = {
             "message": "Análisis en ejecución.",
             "analysis_provider": "gemini",
         }
+        if model_override:
+            processing_summary["model_override"] = model_override
         if previous_summary.get("retry_count") is not None:
             processing_summary["retry_count"] = previous_summary["retry_count"]
         if previous_summary.get("max_retries") is not None:
@@ -130,6 +146,7 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
                 "course_name": course_name,
             },
             "analysis_provider": "gemini",
+            "model": model,
             "message": "Se requiere al menos dos syllabus para comparar un curso.",
             "compared_count": len(syllabi),
             "severity_counts": {},
@@ -148,11 +165,12 @@ def analyze_course(db: Session, course_id: int, report_id: int | None = None) ->
         "course_code": course.course_code,
         "course_name": course_name,
     }
-    comparison = analyze_syllabi(syllabi, course_metadata)
+    comparison = analyze_syllabi(syllabi, course_metadata, model=model)
     elapsed = round(time.perf_counter() - started_at, 3)
     summary = comparison["summary"]
     summary["course"] = comparison.get("course", course_metadata)
     summary["analysis_provider"] = "gemini"
+    summary["model"] = model
     summary["normalized_syllabi_by_nrc"] = comparison.get("normalized_syllabi_by_nrc", {})
     summary["conditions_export_rows"] = build_conditions_rows_for_group(
         course, syllabi, summary["normalized_syllabi_by_nrc"]

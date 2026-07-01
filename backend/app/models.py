@@ -16,6 +16,14 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    user_id = Column(String(36), primary_key=True)
+    gemini_model = Column(String(80), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class CourseGroup(Base):
     __tablename__ = "course_groups"
     __table_args__ = (

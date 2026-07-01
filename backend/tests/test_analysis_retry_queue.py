@@ -87,7 +87,7 @@ def test_processing_state_preserves_retry_count_when_analysis_fails(monkeypatch)
 
     monkeypatch.setattr(
         "app.services.report_service.analyze_syllabi",
-        lambda syllabi, course_metadata: (_ for _ in ()).throw(RuntimeError("provider down")),
+        lambda syllabi, course_metadata, **kwargs: (_ for _ in ()).throw(RuntimeError("provider down")),
     )
 
     with pytest.raises(RuntimeError, match="provider down"):

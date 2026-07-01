@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   BookOpen,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleCheck,
@@ -10,12 +11,13 @@ import {
   FileText,
   Loader2,
   MoreVertical,
+  Sparkles,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { downloadConditionsExport, uploadZip } from "../api";
+import { downloadConditionsExport, getModelPreference, setModelPreference, uploadPdfs, uploadZip } from "../api";
 import { formatPeriod, shiftPeriod } from "../periods";
 
 // ─── Color palette for course cards ─────────────────────────────────────────
@@ -32,6 +34,14 @@ const PALETTE = [
 
 function courseColor(id) {
   return PALETTE[id % PALETTE.length];
+}
+
+function isZipFile(file) {
+  return file.type === "application/zip" || file.name.toLowerCase().endsWith(".zip");
+}
+
+function isPdfFile(file) {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -83,9 +93,7 @@ function UploadZone({ onUploaded, onToast }) {
     e.stopPropagation();
     setDragActive(false);
     dragCounter.current = 0;
-    const dropped = Array.from(e.dataTransfer.files).filter(
-      (f) => f.type === "application/zip" || f.name.endsWith(".zip")
-    );
+    const dropped = Array.from(e.dataTransfer.files).filter((f) => isZipFile(f) || isPdfFile(f));
     if (dropped.length > 0) addFiles(dropped);
   }
 
@@ -93,7 +101,11 @@ function UploadZone({ onUploaded, onToast }) {
     event.preventDefault();
     if (!files.length) return;
     setUploading(true);
-    for (const file of files) {
+
+    const zipFiles = files.filter(isZipFile);
+    const pdfFiles = files.filter(isPdfFile);
+
+    for (const file of zipFiles) {
       try {
         const res = await uploadZip(file);
         onToast?.("ok", res.message);
@@ -106,6 +118,20 @@ function UploadZone({ onUploaded, onToast }) {
         onToast?.("error", `${file.name}: ${exc.message}`);
       }
     }
+
+    if (pdfFiles.length > 0) {
+      try {
+        const res = await uploadPdfs(pdfFiles);
+        onToast?.("ok", res.message);
+        (res.rejected_files || []).forEach((item) =>
+          onToast?.("warn", `${item.filename}: ${item.reason}`)
+        );
+        onUploaded?.(res);
+      } catch (exc) {
+        onToast?.("error", exc.message);
+      }
+    }
+
     setFiles([]);
     setUploading(false);
   }
@@ -127,13 +153,13 @@ function UploadZone({ onUploaded, onToast }) {
       <div className="upload-zone-inner">
         <FileArchive size={26} className="upload-zone-icon" aria-hidden="true" />
         <div className="upload-zone-text">
-          <p>Arrastra archivos ZIP aquí o</p>
+          <p>Arrastra archivos ZIP o PDF aquí o</p>
           <label className="upload-link">
             selecciona archivos
             <input
               ref={inputRef}
               type="file"
-              accept=".zip,application/zip"
+              accept=".zip,application/zip,.pdf,application/pdf"
               multiple
               onChange={(e) => {
                 addFiles(Array.from(e.target.files || []));
@@ -148,7 +174,11 @@ function UploadZone({ onUploaded, onToast }) {
         <ul className="file-queue">
           {files.map((f, i) => (
             <li key={f.name}>
-              <FileArchive size={14} aria-hidden="true" />
+              {isPdfFile(f) ? (
+                <FileText size={14} aria-hidden="true" />
+              ) : (
+                <FileArchive size={14} aria-hidden="true" />
+              )}
               <span>{f.name}</span>
               <button
                 type="button"
@@ -204,6 +234,109 @@ function PeriodSelector({ period, onChange }) {
       >
         <ChevronRight size={18} aria-hidden="true" />
       </button>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODEL SELECTOR TAG
+// ═══════════════════════════════════════════════════════════════════════════════
+function ModelSelectorTag({ onToast }) {
+  const [available, setAvailable] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    getModelPreference()
+      .then((data) => {
+        setAvailable(data.available || []);
+        setSelected(data.selected);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  async function handleSelect(modelId) {
+    setOpen(false);
+    if (modelId === selected) return;
+    const previous = selected;
+    setSelected(modelId);
+    setSaving(true);
+    try {
+      await setModelPreference(modelId);
+    } catch (exc) {
+      setSelected(previous);
+      onToast?.("error", exc.message || "No se pudo cambiar el modelo de IA");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="model-selector">
+        <button type="button" className="model-selector-tag" disabled aria-busy="true">
+          <Sparkles size={14} aria-hidden="true" />
+          <span className="sk model-selector-skeleton" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+
+  if (available.length === 0) return null;
+
+  const selectedModel = available.find((model) => model.id === selected);
+
+  return (
+    <div className="model-selector" ref={containerRef}>
+      <button
+        type="button"
+        className="model-selector-tag"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={saving}
+        title="Cambiar el modelo de IA usado para analizar los syllabus"
+      >
+        <Sparkles size={14} aria-hidden="true" />
+        {selectedModel?.label || "Modelo de IA"}
+        <ChevronDown size={14} className={`model-selector-chevron${open ? " is-open" : ""}`} aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="model-selector-dropdown" role="listbox">
+          {available.map((model) => (
+            <button
+              type="button"
+              key={model.id}
+              role="option"
+              aria-selected={model.id === selected}
+              className={`model-option${model.id === selected ? " model-option--selected" : ""}`}
+              onClick={() => handleSelect(model.id)}
+            >
+              <span className="model-option-label">
+                {model.id === selected && <Check size={14} aria-hidden="true" />}
+                {model.label}
+              </span>
+              <span className="model-option-description">{model.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -633,7 +766,10 @@ export default function Homepage({
     <div className="home-view">
       <UploadZone onUploaded={onRefresh} onToast={addToast} />
 
-      <PeriodSelector period={selectedPeriod} onChange={onPeriodChange} />
+      <div className="top-controls-row">
+        <PeriodSelector period={selectedPeriod} onChange={onPeriodChange} />
+        <ModelSelectorTag onToast={addToast} />
+      </div>
 
       <div className="courses-section">
         <div className="courses-section-header">
@@ -686,8 +822,8 @@ export default function Homepage({
             <h3>{hasAnyCourses ? "No hay cursos en este periodo" : "No hay cursos cargados"}</h3>
             <p>
               {hasAnyCourses
-                ? "Cambia de periodo o sube un archivo ZIP para este periodo."
-                : "Sube un archivo ZIP con syllabus en PDF para comenzar."}
+                ? "Cambia de periodo o sube un archivo ZIP o PDF para este periodo."
+                : "Sube un archivo ZIP o PDF con syllabus para comenzar."}
             </p>
           </div>
         ) : (

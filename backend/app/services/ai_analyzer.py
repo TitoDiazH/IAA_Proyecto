@@ -13,8 +13,9 @@ def analyze_syllabi(
     syllabi: list[Syllabus],
     course_metadata: dict[str, Any],
     client: JsonCompletionClient | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    ai_client = client or get_json_client()
+    ai_client = client or get_json_client(model)
 
     extracted_by_nrc: dict[str, Any] = {}
     for syllabus in syllabi:

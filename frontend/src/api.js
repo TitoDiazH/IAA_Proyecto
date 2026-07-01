@@ -43,8 +43,9 @@ export function getCourse(courseId) {
   return request(`/courses/${courseId}`);
 }
 
-export function analyzeCourse(courseId) {
-  return request(`/courses/${courseId}/analyze`, { method: "POST" });
+export function analyzeCourse(courseId, model) {
+  const params = model ? `?${new URLSearchParams({ model })}` : "";
+  return request(`/courses/${courseId}/analyze${params}`, { method: "POST" });
 }
 
 export async function deleteCourse(courseId) {
@@ -69,6 +70,14 @@ export function uploadZip(file) {
   return request("/uploads/zip", { method: "POST", body });
 }
 
+export function uploadPdfs(files) {
+  const body = new FormData();
+  for (const file of files) {
+    body.append("files", file);
+  }
+  return request("/uploads/pdfs", { method: "POST", body });
+}
+
 export function getConditionsExportTable(academicPeriod) {
   const params = academicPeriod ? `?${new URLSearchParams({ academic_period: academicPeriod })}` : "";
   return request(`/exports/conditions${params}`);
@@ -89,6 +98,18 @@ export async function downloadConditionsExport({ format, filename, academicPerio
     throw new Error(response.statusText || "No se pudo exportar la tabla");
   }
   return response.blob();
+}
+
+export function getModelPreference() {
+  return request("/auth/models");
+}
+
+export function setModelPreference(model) {
+  return request("/auth/models", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
 }
 
 export function syllabusDownloadUrl(syllabusId) {
