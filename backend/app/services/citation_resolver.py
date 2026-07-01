@@ -131,9 +131,27 @@ def build_source_index(normalized_syllabi_by_nrc: dict[str, Any]) -> dict[str, l
     return sources_by_nrc
 
 
+def map_section_label(section_label: Any) -> str | None:
+    """Map a free-text inconsistency section (e.g. "Nota Final de la Asignatura",
+    as written by the AI) to the internal section key used when building _sources
+    (see syllabus_extractor.py's SECTION_* constants), so evidence resolution can
+    be scoped to the right apartado instead of matching across all of them.
+    """
+
+    normalized = str(section_label or "").lower()
+    if "nota final" in normalized:
+        return "nota_final"
+    if "requisito" in normalized:
+        return "requisitos_aprobacion"
+    if "evaluacion" in normalized or "ponderacion" in normalized:
+        return "evaluaciones"
+    return None
+
+
 def resolve_evidence_item(
     item: dict[str, Any],
     sources_by_nrc: dict[str, list[dict[str, Any]]],
+    expected_section: str | None = None,
 ) -> dict[str, Any] | None:
     nrc = str(item.get("nrc") or "").strip()
     if not nrc:
@@ -143,7 +161,8 @@ def resolve_evidence_item(
     source_id = str(item.get("source_id") or item.get("source_ref") or item.get("evidence_ref") or "").strip()
     requested_page = _as_page(item.get("page"))
     sources = sources_by_nrc.get(nrc, [])
-    source = _find_source(source_id, text, sources)
+    section_hint = expected_section or map_section_label(item.get("section"))
+    source = _find_source(source_id, text, sources, section_hint)
 
     if source is not None:
         source_text = source["text"]
@@ -181,16 +200,9 @@ def resolve_evidence_item(
     }
 
 
-def _find_source(source_id: str, text: str, sources: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if source_id:
-        for source in sources:
-            if source.get("source_id") == source_id:
-                return source
-
-    normalized_text = normalize_for_citation_match(text)
-    if not normalized_text:
-        return None
-
+def _best_text_match(
+    normalized_text: str, sources: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, float]:
     best_source = None
     best_score = 0.0
     for source in sources:
@@ -205,7 +217,36 @@ def _find_source(source_id: str, text: str, sources: list[dict[str, Any]]) -> di
         if score > best_score:
             best_score = score
             best_source = source
+    return best_source, best_score
 
+
+def _find_source(
+    source_id: str,
+    text: str,
+    sources: list[dict[str, Any]],
+    section_hint: str | None = None,
+) -> dict[str, Any] | None:
+    if source_id:
+        for source in sources:
+            if source.get("source_id") == source_id:
+                return source
+
+    normalized_text = normalize_for_citation_match(text)
+    if not normalized_text:
+        return None
+
+    # Prefer a match within the section the inconsistency is actually about (e.g.
+    # a "Nota Final" finding shouldn't resolve its citation to an "evaluaciones" row
+    # just because the text happens to look similar). Only fall back to searching
+    # every section if nothing in the expected one matches well enough.
+    if section_hint:
+        scoped_sources = [source for source in sources if source.get("section") == section_hint]
+        if scoped_sources:
+            best_source, best_score = _best_text_match(normalized_text, scoped_sources)
+            if best_score >= 0.62:
+                return best_source
+
+    best_source, best_score = _best_text_match(normalized_text, sources)
     return best_source if best_score >= 0.62 else None
 
 

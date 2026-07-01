@@ -222,15 +222,23 @@ def _categorize_evaluations(evaluations: list[Any]) -> dict[str, dict[str, str]]
 
 
 def _evaluation_category(item: dict[str, Any]) -> str:
+    # Many syllabus templates put the exam row under a generic "tipo" label
+    # (e.g. "Pruebas" or "Otros") and only name it in "descripcion" (e.g. "EXAMEN").
+    # Check descripcion for that signal first so the generic tipo label doesn't
+    # swallow the exam's weight into the wrong column.
+    descripcion_category = _known_evaluation_category(str(item.get("descripcion") or ""))
+    if descripcion_category == "examen":
+        return "examen"
+
     category = _known_evaluation_category(f"{item.get('categoria') or ''} {item.get('tipo') or ''}")
     if category:
         return category
-    return _known_evaluation_category(str(item.get("descripcion") or "")) or "otro"
+    return descripcion_category or "otro"
 
 
 def _known_evaluation_category(text: str) -> str | None:
     text = text.lower()
-    if any(token in text for token in ["examen", "ne"]):
+    if "examen" in text or search(r"\bne\b", text):
         return "examen"
     if any(token in text for token in ["laboratorio", "laborator", "nl"]):
         return "laboratorio"

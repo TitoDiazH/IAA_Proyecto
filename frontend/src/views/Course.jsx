@@ -859,7 +859,7 @@ function InconsistencyCard({ item, onEvidenceSelect }) {
                     <span className="evidence-nrc">NRC {quote.nrc}</span>
                     {item.involved_nrcs?.includes(String(quote.nrc)) && (
                       <span className="evidence-status evidence-status-outlier">
-                        Problemática
+                        Se aleja del patrón del grupo
                       </span>
                     )}
                   </span>

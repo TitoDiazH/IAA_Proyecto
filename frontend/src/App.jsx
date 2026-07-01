@@ -193,10 +193,14 @@ function AppContent() {
   // Track in-flight deletes so refreshCourses() can't restore them from stale API data.
   const pendingDeleteIds = useRef(new Set());         // Set<String(courseId)>
   const pendingDeleteCodes = useRef(new Map());       // Map<course_code, refCount>
+  // Report ids we've already toasted about, so a quota-exceeded failure is only
+  // announced once per report even if it keeps showing up across repeated polls.
+  const notifiedQuotaReportIds = useRef(new Set());
 
-  function addToast(type, message) {
+  function addToast(type, message, { persistent = false } = {}) {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, type, message, isExiting: false }]);
+    if (persistent) return;
     setTimeout(() => {
       setToasts((prev) => prev.map((toast) => (
         toast.id === id ? { ...toast, isExiting: true } : toast
@@ -211,17 +215,21 @@ function AppContent() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
-  function notifyQuotaFailures(previousCourses, nextCourses) {
-    const previousStatusById = new Map(previousCourses.map((c) => [String(c.id), c.latest_report_status]));
+  // Idempotent by report id: a poll can see the same failed report many times,
+  // but we only want to toast the first time we notice it.
+  function notifyQuotaFailure(reportId, courseName) {
+    if (reportId == null || notifiedQuotaReportIds.current.has(reportId)) return;
+    notifiedQuotaReportIds.current.add(reportId);
+    const message = courseName
+      ? `${courseName}: se agotó la cuota de la IA. Intenta el análisis más tarde.`
+      : "Se agotó la cuota de la IA. Intenta el análisis más tarde.";
+    addToast("error", message, { persistent: true });
+  }
+
+  function notifyQuotaFailures(nextCourses) {
     for (const course of nextCourses) {
-      const prevStatus = previousStatusById.get(String(course.id));
-      const justFailed =
-        ["queued", "processing"].includes(prevStatus) && course.latest_report_status === "failed";
-      if (justFailed && course.latest_report_error_type === "quota_exceeded") {
-        addToast(
-          "error",
-          `${course.course_name}: se agotó la cuota de la IA. Intenta el análisis más tarde.`
-        );
+      if (course.latest_report_status === "failed" && course.latest_report_error_type === "quota_exceeded") {
+        notifyQuotaFailure(course.latest_report_id, course.course_name);
       }
     }
   }
@@ -248,7 +256,7 @@ function AppContent() {
       const visible = pendingDeleteIds.current.size
         ? freshCourses.filter((c) => !pendingDeleteIds.current.has(String(c.id)))
         : freshCourses;
-      notifyQuotaFailures(courses, visible);
+      notifyQuotaFailures(visible);
       setCourses(visible);
       writeHomeCache(visible, exportTable, selectedPeriodRef.current);
     } catch (exc) {
@@ -482,15 +490,14 @@ function AppContent() {
 
     const interval = window.setInterval(async () => {
       try {
-        const wasActive = ["queued", "processing"].includes(status);
         const [updatedCourse, latestReport] = await Promise.all([
           getCourse(activeCourse.id),
           getLatestReport(activeCourse.id),
         ]);
         setActiveCourse(updatedCourse);
         setReport(latestReport);
-        if (wasActive && latestReport.status === "failed" && latestReport.summary?.error_type === "quota_exceeded") {
-          addToast("error", "Se agotó la cuota de la IA. Intenta el análisis más tarde.");
+        if (latestReport.status === "failed" && latestReport.summary?.error_type === "quota_exceeded") {
+          notifyQuotaFailure(latestReport.id);
         }
       } catch (exc) {
         setError(exc.message);

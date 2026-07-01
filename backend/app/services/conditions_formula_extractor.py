@@ -44,6 +44,11 @@ Reglas estrictas:
   extraído. No incluyas evidencia para campos null.
 - confianza_extraccion debe estar entre 0 y 1. Baja la confianza si el texto es ambiguo,
   incompleto o si la fórmula solo puede inferirse parcialmente.
+- Es común que requisitos_aprobacion y nota_final repitan el mismo texto casi palabra por
+  palabra. En ese caso úsalos como una sola fuente de información, no los compares entre sí
+  ni los trates como datos independientes. Si en un caso excepcional ambos apartados se
+  contradicen en un mismo dato, prioriza nota_final para la fórmula de cálculo y
+  requisitos_aprobacion para condiciones de aprobación/exención, y agrega una advertencia.
 
 Formato de campos:
 - requisitos_aprobacion: condiciones compactas separadas por punto y coma.
@@ -70,6 +75,26 @@ Salida:
   ],
   "confianza_extraccion": 0.95,
   "advertencias": []
+}
+
+Ejemplo con fórmula condicional (confianza media):
+Texto relevante: "NP=(P1+P2+P3+P4)/4. Si NP y EX >= 3.0: NF=0.7*NP+0.3*EX. Si NP < 3.0: NF = NP.
+Si EX < 3.0 y 0.7*NP+0.3*EX >= 4.0: NF = 3.9. Se exime con NP >= 5.5."
+Salida:
+{
+  "nrc": "5678",
+  "requisitos_aprobacion": "NP >= 3.0 para presentarse a examen; NF >= 4.0 y EX >= 3.0 para aprobar",
+  "requisitos_exencion": "NP >= 5.5",
+  "formula_nota_final": "NF = 0.7*NP + 0.3*EX",
+  "nota_final_reprobados": "Si NP < 3.0 -> NF = NP; Si EX < 3.0 y NF>=4.0 -> NF = 3.9",
+  "otros_criterios": "NP = (P1+P2+P3+P4)/4",
+  "evidencia_textual": [
+    {"campo": "formula_nota_final", "fragmento": "Si NP y EX >= 3.0: NF=0.7*NP+0.3*EX"},
+    {"campo": "nota_final_reprobados", "fragmento": "NF = 3.9"},
+    {"campo": "requisitos_exencion", "fragmento": "Se exime con NP >= 5.5"}
+  ],
+  "confianza_extraccion": 0.75,
+  "advertencias": ["Fórmula con ramas condicionales adicionales; revisar manualmente si se requiere el detalle completo."]
 }
 """.strip()
 

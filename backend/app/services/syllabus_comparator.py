@@ -6,7 +6,7 @@ import unicodedata
 from typing import Any
 
 from app.services.ai_client import AIProviderError, JsonCompletionClient
-from app.services.citation_resolver import build_source_index, resolve_evidence_item
+from app.services.citation_resolver import build_source_index, map_section_label, resolve_evidence_item
 from app.services.filename_parser import normalize_course_name
 from app.services.syllabus_prompts import (
     SYLLABUS_COMPARISON_SCHEMA,
@@ -84,6 +84,7 @@ def _normalize_severity(value: Any) -> str:
 def _normalize_evidence_items(
     items: Any,
     sources_by_nrc: dict[str, list[dict[str, Any]]] | None = None,
+    expected_section: str | None = None,
 ) -> list[dict[str, Any]]:
     normalized_items: list[dict[str, Any]] = []
     if not isinstance(items, list):
@@ -93,7 +94,7 @@ def _normalize_evidence_items(
     for item in items:
         if not isinstance(item, dict):
             continue
-        resolved = resolve_evidence_item(item, source_index)
+        resolved = resolve_evidence_item(item, source_index, expected_section)
         if resolved is None:
             continue
         normalized_items.append(resolved)
@@ -196,7 +197,9 @@ def _normalize_comparison_result(
         if not outlier_nrcs and majority_value is not None:
             outlier_nrcs = [nrc for nrc, value in values_by_nrc.items() if value is not None and value != majority_value]
 
-        evidence = _normalize_evidence_items(item.get("evidence"), sources_by_nrc)
+        evidence = _normalize_evidence_items(
+            item.get("evidence"), sources_by_nrc, map_section_label(item.get("section"))
+        )
 
         normalized_item = {
             "section": str(item.get("section") or "Apartado no especificado").strip(),

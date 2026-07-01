@@ -81,7 +81,7 @@ def test_build_conditions_export_table_uses_completed_report_normalized_data():
     )
     db.commit()
 
-    table = build_conditions_export_table(db)
+    table = build_conditions_export_table(db, None)
 
     assert table["row_count"] == 1
     assert table["rows"][0][:7] == [
@@ -156,11 +156,13 @@ def test_build_conditions_export_table_assigns_unknown_evaluation_to_other():
     )
     db.commit()
 
-    table = build_conditions_export_table(db)
+    table = build_conditions_export_table(db, None)
 
-    assert table["rows"][0][5:7] == ["20%", "1"]
+    # The "Pruebas" row whose descripcion says "Examen" must land in the Examen
+    # column, not be absorbed into Pruebas just because of the generic tipo label.
+    assert table["rows"][0][5:7] == ["", ""]
     assert table["rows"][0][10:12] == ["85%", "Impact Project; Actividad especial"]
-    assert table["rows"][0][12:14] == ["", ""]
+    assert table["rows"][0][12:14] == ["20%", "1"]
 
 
 def test_conditions_table_to_xlsx_returns_openxml_zip():
@@ -282,7 +284,7 @@ def test_conditions_export_fallback_does_not_break_decimal_formula():
     )
     db.commit()
 
-    table = build_conditions_export_table(db)
+    table = build_conditions_export_table(db, None)
 
     assert table["rows"][0][16] == "NF = 0.7 NP + 0.3 EX"
     assert table["rows"][0][16] != "NF = 0"
