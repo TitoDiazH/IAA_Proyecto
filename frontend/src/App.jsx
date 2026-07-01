@@ -9,7 +9,7 @@ import {
   listCourses,
 } from "./api";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { currentPeriod } from "./periods";
+import { currentPeriod, formatPeriod } from "./periods";
 import Login from "./views/Login";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
@@ -245,6 +245,14 @@ function AppContent() {
           return p !== 0 ? p : a.course_code.localeCompare(b.course_code);
         });
       });
+
+      // Jump the period view to wherever the upload landed, so newly uploaded
+      // courses aren't silently hidden behind whatever period was selected.
+      const uploadedPeriod = uploadResult.courses[0]?.academic_period;
+      if (uploadedPeriod && uploadedPeriod !== selectedPeriodRef.current) {
+        changePeriod(uploadedPeriod);
+        addToast("ok", `Mostrando periodo ${formatPeriod(uploadedPeriod)}`);
+      }
     }
 
     if (!uploadResult) setLoadingCourses(true);
