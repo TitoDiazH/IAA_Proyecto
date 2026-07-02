@@ -1,5 +1,6 @@
-import { BookOpen, Check, X } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { useState } from "react";
+import { isPasswordValid, PasswordRequirements } from "../passwordRules";
 import { supabase } from "../supabase";
 const campusImage = "/campus.webp";
 
@@ -18,39 +19,8 @@ function translateError(msg) {
   return msg;
 }
 
-const PASSWORD_RULES = [
-  { label: "Mínimo 8 caracteres", test: (pw) => pw.length >= 8 },
-  { label: "Una letra mayúscula", test: (pw) => /[A-Z]/.test(pw) },
-  { label: "Una letra minúscula", test: (pw) => /[a-z]/.test(pw) },
-  { label: "Un número", test: (pw) => /[0-9]/.test(pw) },
-  { label: "Un carácter especial (!@#$%...)", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
-];
-
-function isPasswordValid(pw) {
-  return PASSWORD_RULES.every((rule) => rule.test(pw));
-}
-
-function PasswordRequirements({ password }) {
-  return (
-    <ul className="password-requirements">
-      {PASSWORD_RULES.map((rule) => {
-        const met = rule.test(password);
-        return (
-          <li
-            key={rule.label}
-            className={`password-requirement${met ? " password-requirement--met" : ""}`}
-          >
-            {met ? <Check size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />}
-            {rule.label}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 export default function Login() {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState("login"); // "login" | "register" | "forgot"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -67,7 +37,7 @@ export default function Login() {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-      } else {
+      } else if (mode === "register") {
         if (!isPasswordValid(password)) {
           setError("La contraseña no cumple los requisitos de seguridad.");
           setLoading(false);
@@ -80,6 +50,14 @@ export default function Login() {
         );
         setMode("login");
         setPassword("");
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin,
+        });
+        if (error) throw error;
+        setSuccess(
+          "Si existe una cuenta con ese correo, te enviamos un link para restablecer tu contraseña."
+        );
       }
     } catch (err) {
       setError(translateError(err.message || "Error inesperado"));
@@ -90,6 +68,20 @@ export default function Login() {
 
   function toggleMode() {
     setMode((m) => (m === "login" ? "register" : "login"));
+    setError(null);
+    setSuccess(null);
+    setPassword("");
+  }
+
+  function goToForgotPassword() {
+    setMode("forgot");
+    setError(null);
+    setSuccess(null);
+    setPassword("");
+  }
+
+  function backToLogin() {
+    setMode("login");
     setError(null);
     setSuccess(null);
     setPassword("");
@@ -124,24 +116,36 @@ export default function Login() {
             />
           </div>
 
-          <div className="form-field">
-            <label htmlFor="auth-password" className="form-label">
-              Contraseña
-            </label>
-            <input
-              id="auth-password"
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              minLength={8}
-              placeholder={mode === "register" ? "Mínimo 8 caracteres" : ""}
-              disabled={loading}
-            />
-            {mode === "register" && <PasswordRequirements password={password} />}
-          </div>
+          {mode !== "forgot" && (
+            <div className="form-field">
+              <label htmlFor="auth-password" className="form-label">
+                Contraseña
+              </label>
+              <input
+                id="auth-password"
+                type="password"
+                className="form-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                minLength={8}
+                placeholder={mode === "register" ? "Mínimo 8 caracteres" : ""}
+                disabled={loading}
+              />
+              {mode === "register" && <PasswordRequirements password={password} />}
+              {mode === "login" && (
+                <button
+                  type="button"
+                  className="auth-forgot-link"
+                  onClick={goToForgotPassword}
+                  disabled={loading}
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
+            </div>
+          )}
 
           {error && <p className="message error">{error}</p>}
           {success && <p className="message ok">{success}</p>}
@@ -151,20 +155,27 @@ export default function Login() {
             className="primary-button auth-submit"
             disabled={loading || (mode === "register" && !isPasswordValid(password))}
           >
-            {loading ? "Cargando…" : mode === "login" ? "Ingresar" : "Crear cuenta"}
+            {loading
+              ? "Cargando…"
+              : mode === "login"
+                ? "Ingresar"
+                : mode === "register"
+                  ? "Crear cuenta"
+                  : "Enviar link de recuperación"}
           </button>
         </form>
 
-        <button
-          type="button"
-          className="auth-switch"
-          onClick={toggleMode}
-          disabled={loading}
-        >
-          {mode === "login"
-            ? "¿No tienes cuenta? Regístrate"
-            : "¿Ya tienes cuenta? Ingresa"}
-        </button>
+        {mode === "forgot" ? (
+          <button type="button" className="auth-switch" onClick={backToLogin} disabled={loading}>
+            Volver a ingresar
+          </button>
+        ) : (
+          <button type="button" className="auth-switch" onClick={toggleMode} disabled={loading}>
+            {mode === "login"
+              ? "¿No tienes cuenta? Regístrate"
+              : "¿Ya tienes cuenta? Ingresa"}
+          </button>
+        )}
       </div>
     </div>
   );

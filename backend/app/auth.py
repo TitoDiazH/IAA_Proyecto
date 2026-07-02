@@ -44,26 +44,4 @@ async def get_current_user(
     user_id = str(auth_response.user.id)
     user_email = auth_response.user.email or ""
 
-    try:
-        profile = (
-            supabase.table("profiles")
-            .select("role")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        role = profile.data.get("role", "user") if profile.data else "user"
-    except Exception as exc:
-        logger.warning("Could not fetch role for user %s: %s", user_id, exc)
-        role = "user"
-
-    return {"id": user_id, "email": user_email, "role": role}
-
-
-def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
-    if current_user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Se requieren permisos de administrador para esta acción",
-        )
-    return current_user
+    return {"id": user_id, "email": user_email}

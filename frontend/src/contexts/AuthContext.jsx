@@ -3,47 +3,28 @@ import { supabase } from "../supabase";
 
 const AuthContext = createContext(null);
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
-
-async function fetchUserRole(accessToken) {
-  try {
-    const res = await fetch(`${API_BASE}/auth/me`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return "user";
-    const data = await res.json();
-    return data.role || "user";
-  } catch {
-    return "user";
-  }
-}
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
-  const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
-      if (session?.access_token) {
-        fetchUserRole(session.access_token).then(setRole);
-      }
     });
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.access_token) {
-        const r = await fetchUserRole(session.access_token);
-        setRole(r);
-      } else {
-        setRole(null);
+      // Fired when the user follows the password-reset link from their email.
+      // Show the "set a new password" screen instead of dropping them into the app.
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
       }
     });
 
@@ -52,11 +33,17 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    setRole(null);
+    setIsPasswordRecovery(false);
+  }
+
+  function clearPasswordRecovery() {
+    setIsPasswordRecovery(false);
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, role, loading, signOut }}>
+    <AuthContext.Provider
+      value={{ user, session, loading, signOut, isPasswordRecovery, clearPasswordRecovery }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -11,6 +11,7 @@ import {
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { currentPeriod, formatPeriod } from "./periods";
 import Login from "./views/Login";
+import ResetPassword from "./views/ResetPassword";
 import Course from "./views/Course";
 import Homepage from "./views/Homepage";
 
@@ -167,7 +168,7 @@ function updateBrowserRoute(route, { replace = false } = {}) {
 }
 
 function AppContent() {
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, isPasswordRecovery, clearPasswordRecovery } = useAuth();
 
   const [route, setRoute] = useState(parseRoute);
   const [courses, setCourses] = useState(() => readHomeCache()?.courses ?? []);
@@ -356,6 +357,16 @@ function AppContent() {
     refreshCourses();
   }
 
+  async function handleAnalyzeCourseFromCard(courseId) {
+    try {
+      await analyzeCourse(courseId);
+      addToast("ok", "Análisis encolado");
+      refreshCourses();
+    } catch (exc) {
+      addToast("error", exc.message);
+    }
+  }
+
   function handleDeleteCourse(courseId) {
     const key = String(courseId);
     const removed = courses.find((c) => String(c.id) === key);
@@ -519,6 +530,10 @@ function AppContent() {
     return <div className="auth-loading">Cargando…</div>;
   }
 
+  if (isPasswordRecovery) {
+    return <ResetPassword onDone={clearPasswordRecovery} />;
+  }
+
   if (!user) {
     return <Login />;
   }
@@ -552,6 +567,7 @@ function AppContent() {
           onRefresh={refreshCourses}
           onDeleteCourse={handleDeleteCourse}
           onDeleteMany={handleDeleteMany}
+          onAnalyzeCourse={handleAnalyzeCourseFromCard}
           addToast={addToast}
         />
       ) : (

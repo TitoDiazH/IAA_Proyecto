@@ -11,6 +11,7 @@ import {
   FileText,
   Loader2,
   MoreVertical,
+  RefreshCcw,
   Sparkles,
   Trash2,
   Upload,
@@ -367,7 +368,7 @@ function SkeletonCard() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // COURSE CARD
 // ═══════════════════════════════════════════════════════════════════════════════
-function CourseCard({ course, onClick, onDelete, selecting, selected, onToggleSelect }) {
+function CourseCard({ course, onClick, onDelete, onAnalyze, selecting, selected, onToggleSelect }) {
   const color = courseColor(course.id);
   const status = course.latest_report_status;
   const isProcessing = ["queued", "processing"].includes(status);
@@ -484,15 +485,28 @@ function CourseCard({ course, onClick, onDelete, selecting, selected, onToggleSe
           {menuOpen && (
             <div className="card-menu-dropdown" role="menu">
               {!confirming ? (
-                <button
-                  type="button"
-                  className="card-menu-item card-menu-item--danger"
-                  role="menuitem"
-                  onClick={() => setConfirming(true)}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  Eliminar curso
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="card-menu-item"
+                    role="menuitem"
+                    disabled={isProcessing}
+                    title={isProcessing ? "Ya hay un análisis en curso" : undefined}
+                    onClick={() => { setMenuOpen(false); onAnalyze(course.id); }}
+                  >
+                    <RefreshCcw size={14} aria-hidden="true" />
+                    Reanalizar
+                  </button>
+                  <button
+                    type="button"
+                    className="card-menu-item card-menu-item--danger"
+                    role="menuitem"
+                    onClick={() => setConfirming(true)}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    Eliminar curso
+                  </button>
+                </>
               ) : (
                 <div className="card-menu-confirm">
                   <p>¿Eliminar este curso? Esta acción no se puede deshacer.</p>
@@ -730,6 +744,7 @@ export default function Homepage({
   onRefresh,
   onDeleteCourse,
   onDeleteMany,
+  onAnalyzeCourse,
   addToast,
 }) {
   const [selecting, setSelecting] = useState(false);
@@ -834,6 +849,7 @@ export default function Homepage({
                 course={course}
                 onClick={() => onOpenCourse(course.id)}
                 onDelete={onDeleteCourse}
+                onAnalyze={onAnalyzeCourse}
                 selecting={selecting}
                 selected={selectedIds.has(course.id)}
                 onToggleSelect={toggleSelect}
